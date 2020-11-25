@@ -1,0 +1,6 @@
+# files to be ignored.
+nohup.out
+*.py[cod]
+
+# expect this one
+!.gitignore
