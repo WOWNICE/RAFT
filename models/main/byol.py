@@ -11,6 +11,8 @@ from models.main import RandomApply
 
 from models.submodels.emas import Ema
 
+import scipy.spatial as spatial
+
 
 class Model(nn.Module):
     """
@@ -122,10 +124,10 @@ class Model(nn.Module):
             batch_size = min(y_online2.shape[0], 64)
             self.z_online1 = self.normalize(z_online1)[:batch_size,:]
             self.z_online2 = self.normalize(z_online2)[:batch_size,:]
-            self.z_online_pred1 = z_online_pred1.detach()[:batch_size,:]
-            self.z_online_pred2 = z_online_pred2.detach()[:batch_size,:]
-            self.z_target1 = z_target1[:batch_size,:]
-            self.z_target2 = z_target2[:batch_size,:]
+            self.z_online_pred1 = self.normalize(z_online_pred1)[:batch_size,:]
+            self.z_online_pred2 = self.normalize(z_online_pred2)[:batch_size,:]
+            self.z_target1 = self.normalize(z_target1)[:batch_size,:]
+            self.z_target2 = self.normalize(z_target2)[:batch_size,:]
 
     def forward(self, x1, x2):
         """
@@ -168,9 +170,9 @@ class Model(nn.Module):
         """
         with torch.no_grad():
             def lunif(x, t=2):
-                x1, x2 = x[:-1,:], x[1:,:]
+                x = x.cpu().numpy()
                 # sq_pdist = torch.pdist(x, p=2).pow(2)     # not supported in AMP
-                sq_pdist = (x1 - x2).square().sum()
+                sq_pdist = torch.Tensor(spatial.distance.pdist(x, 'minkowski', p=2)).pow(2)
                 return sq_pdist.mul(-t).exp().mean().log()
 
             uniform_online = (lunif(self.z_online1) + lunif(self.z_online2)) / 2

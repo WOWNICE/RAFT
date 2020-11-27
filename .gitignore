@@ -1,6 +1,7 @@
 # files to be ignored.
 nohup.out
 *.py[cod]
+**/.idea/workspace.xml **/.idea/tasks.xml
 
 # expect this one
 !.gitignore

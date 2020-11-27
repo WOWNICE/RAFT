@@ -118,7 +118,7 @@ def eval(online, args):
         # write it into
         writer.add_scalars('accuracy', metrics, epoch)
 
-    print(f'Accuracy of model {args.checkpoint}: {np.array(last_epoch_accs).mean()}±{np.array(last_epoch_accs).std()}')
+    print(f'Accuracy of model {args.checkpoint}: {100*np.array(last_epoch_accs).mean():.2f}±{100*np.array(last_epoch_accs).std():.2f}')
 
 
 def load_model(model_checkpoint, encoder='resnet18', online=True, projector='', predictor=''):
@@ -183,13 +183,17 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    model = load_model(
-        model_checkpoint=args.checkpoint,
-        encoder=args.encoder,
-        online=args.eval_mode == 'online',
-        projector=args.projector,
-        predictor=args.predictor
-    )
+    # used for estimating the random baseline.
+    if args.eval_mode == 'rand':
+        model = name_model_dic[args.encoder]()
+    else:
+        model = load_model(
+            model_checkpoint=args.checkpoint,
+            encoder=args.encoder,
+            online=args.eval_mode == 'online',
+            projector=args.projector,
+            predictor=args.predictor
+        )
 
     # eval args
     eval(model, args)
