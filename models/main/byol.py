@@ -9,8 +9,6 @@ from kornia import filters, color
 from models import name_model_dic as func_dic
 from models.main import RandomApply
 
-from models.submodels.emas import Ema
-
 import scipy.spatial as spatial
 
 
@@ -25,12 +23,13 @@ class Model(nn.Module):
             projector='byol-proj',
             predictor='byol-proj',
             normalization='l2',
-            ema='sgd',
-            ema_lr=4e-3,
+
             # shapes
             input_shape=(3, 224, 224),
             proj_shape=(4096, 256),
-            predictor_shape=(4096, 256)
+            predictor_shape=(4096, 256),
+            same_init=False,
+            **kargs
     ):
         super(Model, self).__init__()
 
@@ -58,18 +57,17 @@ class Model(nn.Module):
         self.online = encoder()
         self.online_proj = projector([rep_shape, *proj_shape])
 
+        # online-target initialization
+        if same_init:
+            for target_param, online_param in [*zip(self.target.parameters(), self.online.parameters()),
+                                               *zip(self.target_proj.parameters(), self.online_proj.parameters())]:
+                target_param.data = online_param.data
+
         self.pred = predictor([proj_shape[-1], *predictor_shape])
 
         self.rep_dim = rep_shape
 
         self.normalize = normalization
-
-        self.ema = Ema(
-            target=self.target,
-            target_proj=self.target_proj,
-            opt=ema,
-            lr=ema_lr,
-        )
 
         # set the transformations
         self._set_transforms(input_shape[1])
@@ -148,8 +146,6 @@ class Model(nn.Module):
 
         return loss
 
-    def update_target(self):
-        self.ema.update(self.online, self.online_proj)
 
     def estimate_align(self):
         """

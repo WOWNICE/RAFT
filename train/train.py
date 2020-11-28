@@ -22,6 +22,10 @@ from collections import defaultdict
 # supervision of training
 from torch.utils.tensorboard import SummaryWriter
 
+from models.wrappers.ema import EmaWrapper
+
+from apex import amp
+
 
 def cleanup():
     dist.destroy_process_group()
@@ -67,35 +71,44 @@ def train(gpu, args):
         sampler=train_sampler
     )
 
-    # BYOL model
+    # model
     model =  Model(
         # models
         encoder=args.encoder,
         projector=args.projector,
         predictor=args.predictor,
         normalization=args.normalization,
-        ema=args.ema_mode,
-        ema_lr=args.ema_lr,
+
         # shapes
         input_shape=(3, args.resize_dim, args.resize_dim),
         proj_shape=(args.mlp_middim, args.mlp_outdim),
-        predictor_shape=(args.mlp_middim, args.mlp_outdim)
-    ).cuda()
+        predictor_shape=(args.mlp_middim, args.mlp_outdim),
+        alignment_weight=args.alignment_weight,
+        cross_weight=args.cross_weight,
 
-    # if gpu == 0:
-    #     print(model)
+        # init
+        same_init=args.same_init == 'True'
+    )
 
-    # starts from the same initialization.
-    if args.same_init == 'True':
-        for target_param, online_param in [*zip(model.target.parameters(), model.online.parameters()),
-                                           *zip(model.target_proj.parameters(), model.online_proj.parameters())]:
-            target_param.data = online_param.data
+    # sync batch
+    if args.sync_bn == 'True':
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).cuda()
+    else:
+        model = model.cuda()
 
     # online optimizer
     if args.optimizer == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
     elif args.optimizer == 'adam':
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    # amp apex training for the main model
+    if args.amp == 'True':
+        model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
+
+    # ema wrapper should go after the amp wrapper
+    model = EmaWrapper(model, opt=args.ema_mode, lr=args.ema_lr, momentum=1)
+    # _, model.optimizer = amp.initialize([model.model.target, model.model.target_proj], model.optimizer, opt_level="O1")
 
     # DDP wrapper for the model
     model = nn.parallel.DistributedDataParallel(model, device_ids=[gpu])
@@ -121,7 +134,7 @@ def train(gpu, args):
                 optimizer.step()
 
             # update the target network.
-            model.module.update_target()
+            model.module.update()
 
             if gpu == 0:
                 _, loss_alignment, _ = model.module.estimate_align()
@@ -163,7 +176,8 @@ def train(gpu, args):
 
                 if gpu == 0:
                     print(f"Saving model at epoch {epoch}")
-                    torch.save(model.module.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
+                    # ddp->ema_wrapper->model
+                    torch.save(model.module.model.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
 
                 # let other workers wait until model is finished
                 # dist.barrier()
@@ -171,7 +185,7 @@ def train(gpu, args):
 
     # save your improved network
     if gpu == 0:
-        torch.save(model.module.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
+        torch.save(model.module.model.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
 
     cleanup()
 
@@ -210,6 +224,10 @@ if __name__ == '__main__':
                         help='port number')
 
     # training details
+    parser.add_argument('--sync-bn', default='False', type=str, metavar='N',
+                        help='whether globally sync BN layers')
+    parser.add_argument('--amp', default='False', type=str, metavar='N',
+                        help='whether use apex.amp to accelerate training')
     parser.add_argument('--num-workers', default=4, type=int, metavar='N',
                         help='number of data loader workers per process')
     parser.add_argument('--epochs', default=300, type=int, metavar='N',
@@ -239,9 +257,9 @@ if __name__ == '__main__':
                         help='whether starts from the same initialization')
 
     # RAFT specific setting
-    parser.add_argument('--cross-model-loss-weight', default=1., type=float, metavar='N',
+    parser.add_argument('--cross-weight', default=1., type=float, metavar='N',
                         help='the weight of the cross model loss')
-    parser.add_argument('--align-loss-weight', default=1., type=float, metavar='N',
+    parser.add_argument('--alignment-weight', default=1., type=float, metavar='N',
                         help='the weight of the align model loss')
     parser.add_argument('--cross-model-mode', default='base', type=str, metavar='N',
                         help='mode od the cross-model-loss')
