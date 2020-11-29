@@ -90,6 +90,11 @@ def train(gpu, args):
         same_init=args.same_init == 'True'
     )
 
+    # reload the checkpoint
+    if args.reload_ckpt:
+        dic = torch.load(args.reload_ckpt, map_location=torch.device('cpu'))
+        model.load_state_dict(dic)
+
     # sync batch
     if args.sync_bn == 'True':
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).cuda()
@@ -118,7 +123,7 @@ def train(gpu, args):
 
     # solver
     global_step = 0
-    for epoch in range(args.epochs):
+    for epoch in range(args.reload_epoch, args.epochs+args.reload_epoch):
         current_time = time.time()
         metrics = defaultdict(list)
         for step, ((x1, x2), labels) in enumerate(train_loader):
@@ -252,6 +257,10 @@ if __name__ == '__main__':
                         help='checkpoint online model per epoch')
     parser.add_argument('--checkpoint-dir', default='checkpoints', type=str, metavar='N',
                         help='checkpoint online model per epoch')
+    parser.add_argument('--reload-ckpt', default='', type=str, metavar='N',
+                        help='which checkpoint to reload.')
+    parser.add_argument('--reload-epoch', default=0, type=int, metavar='N',
+                        help='epoch trained on the reloaded checkpoint.')
 
     parser.add_argument('--same-init', default='False', type=str, metavar='N',
                         help='whether starts from the same initialization')
