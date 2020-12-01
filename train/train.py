@@ -22,8 +22,6 @@ from collections import defaultdict
 # supervision of training
 from torch.utils.tensorboard import SummaryWriter
 
-from models.wrappers.ema import EmaWrapper
-
 from apex import amp
 
 
@@ -112,7 +110,9 @@ def train(gpu, args):
         model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 
     # ema wrapper should go after the amp wrapper
-    model = EmaWrapper(model, opt=args.ema_mode, lr=args.ema_lr, momentum=1)
+    file_name, wrapper_name = args.wrapper.split('.')
+    Wrapper = getattr(importlib.import_module(f'models.wrappers.{file_name}'), wrapper_name)
+    model = Wrapper(model, opt=args.ema_mode, lr=args.ema_lr, momentum=1)
     # _, model.optimizer = amp.initialize([model.model.target, model.model.target_proj], model.optimizer, opt_level="O1")
 
     # DDP wrapper for the model
@@ -216,6 +216,8 @@ if __name__ == '__main__':
                         help='output dimension of the mlp.')
     parser.add_argument('--normalization', default='l2', type=str, metavar='N',
                         help='encoder.')
+    parser.add_argument('--wrapper', default='weight_wrapper.EmaWrapper', type=str, metavar='N',
+                        help='wrapper_file.wrapper_name')
 
 
     # sub-process info

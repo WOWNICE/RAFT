@@ -27,6 +27,7 @@ dataset_classes = {
     'cifar10':      10,
     'cifar100':     100,
     'miniimagenet': 100,
+    'imagenet': 1000,
 }
 
 def eval(online, args):

@@ -55,3 +55,36 @@ class EmaWrapper(nn.Module):
 
         elif self.opt == 'fix':
             pass
+
+class FreezePredWrapper(EmaWrapper):
+    def __init__(self, model, opt='sgd', lr=4e-3, momentum=0.9):
+        super(FreezePredWrapper, self).__init__(
+            model=model,
+            opt=opt,
+            lr=lr,
+            momentum=momentum
+        )
+
+        for param in self.model.pred.parameters():
+            param.requires_grad = False
+
+
+class RandPredWrapper(EmaWrapper):
+    def __init__(self, model, opt='sgd', lr=4e-3, momentum=0.9):
+        super(RandPredWrapper, self).__init__(
+            model=model,
+            opt=opt,
+            lr=lr,
+            momentum=momentum
+        )
+
+    def update_pred(self):
+        def reset_param(layer):
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
+
+        self.model.pred.apply(reset_param)
+
+    def update(self):
+        super(RandPredWrapper, self).update()
+        self.update_pred()
