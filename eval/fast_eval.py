@@ -22,7 +22,7 @@ from models import name_model_dic
 dataset_classes = {
     'cifar10':      10,
     'cifar100':     100,
-    'miniimagenet': 100,
+    'subimagenet': 100,
     'imagenet': 1000,
 }
 

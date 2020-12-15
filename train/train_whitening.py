@@ -168,20 +168,17 @@ def train(gpu, args):
 
             # update the target network.
             model.module.update()
-            if gpu == 0:
-                print(f'time for update target network: {time.time() - ctime}')
-                ctime = time.time()
+
 
             if gpu == 0 and args.log == 'True':
-                _, loss_alignment, _ = model.module.estimate_align()
-                _, loss_cross_model = model.module.estimate_cross()
-                _, loss_uniform, _ = model.module.estimate_uniform()
+                loss_alignment = model.module.estimate_align()
+                loss_uniform = model.module.estimate_uniform()
                 writer.add_scalars(
                     "Losses/train_step",
                     {
                         'loss-total': loss,
                         'loss-alignment': loss_alignment,
-                        'loss-cross-model': loss_cross_model,
+                        # 'loss-cross-model': loss_cross_model,
                         'loss-uniformity': loss_uniform
                     },
                     global_step
@@ -190,14 +187,10 @@ def train(gpu, args):
                 # append all the loss term into the dictionary.
                 metrics["loss-total"].append(loss.item())
                 metrics["loss-alignment"].append(loss_alignment.item())
-                metrics["loss-cross-model"].append(loss_cross_model.item())
+                # metrics["loss-cross-model"].append(loss_cross_model.item())
                 metrics["loss-uniform"].append(loss_uniform.item())
 
             global_step += 1
-
-            if gpu == 0:
-                print(f'time for logging: {time.time() - ctime}')
-                ctime = time.time()
 
 
         if gpu == 0:
@@ -220,11 +213,6 @@ def train(gpu, args):
                     print(f"Saving model at epoch {epoch}")
                     # ddp->ema_wrapper->model
                     torch.save(model.module.model.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
-
-                # let other workers wait until model is finished
-                # dist.barrier()
-            print(f'time for logging episode stat: {time.time() - ctime}')
-            ctime = time.time()
 
 
     # save your improved network
