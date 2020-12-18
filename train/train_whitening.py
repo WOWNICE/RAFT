@@ -22,7 +22,7 @@ from collections import defaultdict
 # supervision of training
 from torch.utils.tensorboard import SummaryWriter
 
-from apex import amp
+from models import *
 
 
 def cleanup():
@@ -31,7 +31,7 @@ def cleanup():
 
 def train(gpu, args):
     # import the {data loader/Model} by name
-    load_trainset = getattr(importlib.import_module(f'dataset_wrappers.{args.dataset}'), 'load_trainset')
+    load_trainset = getattr(importlib.import_module(f'dataset_apis.{args.dataset}'), 'load_trainset')
     Model = getattr(importlib.import_module(f'models.main.{args.model}'), 'Model')
 
     rank = args.nr * args.gpus + gpu
@@ -115,12 +115,15 @@ def train(gpu, args):
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # amp apex training for the main model
+    try:
+        from apex import amp
+    except:
+        args.amp = False
     if args.amp == 'True':
         model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 
     # ema wrapper should go after the amp wrapper
-    file_name, wrapper_name = args.wrapper.split('.')
-    Wrapper = getattr(importlib.import_module(f'models.wrappers.{file_name}'), wrapper_name)
+    Wrapper = WRAPPERS[args.wrapper]
     model = Wrapper(model, opt=args.ema_mode, lr=args.ema_lr, momentum=1, pred_path=args.pred_checkpoint)
     # _, model.optimizer = amp.initialize([model.model.target, model.model.target_proj], model.optimizer, opt_level="O1")
 
@@ -135,36 +138,19 @@ def train(gpu, args):
     for epoch in range(args.reload_epoch, args.epochs+args.reload_epoch):
         current_time = time.time()
         metrics = defaultdict(list)
-        if gpu == 0:
-            ctime = time.time()
+
         for step, ((x1, x2), labels) in enumerate(train_loader):
             # train the online to approximate the target.
             # each round is formed of 100 epoch
-            if gpu == 0:
-                print(f'time for load data: {time.time() - ctime}')
-                ctime = time.time()
-            x1, x2 = x1.cuda(gpu), x2.cuda(gpu)
-            if gpu == 0:
-                print(f'time for load data to gpu: {time.time() - ctime}')
-                ctime = time.time()
-
+            x1, x2 = x1.cuda(non_blocking=True), x2.cuda(non_blocking=True)
 
             for k in range(args.k):
                 loss = model(x1, x2)
-                if gpu == 0:
-                    print(f'time for forward pass: {time.time() - ctime}')
-                    ctime = time.time()
 
                 optimizer.zero_grad()
                 loss.backward()
-                if gpu == 0:
-                    print(f'time for backward compute: {time.time() - ctime}')
-                    ctime = time.time()
 
                 optimizer.step()
-                if gpu == 0:
-                    print(f'time for backward update: {time.time() - ctime}')
-                    ctime = time.time()
 
             # update the target network.
             model.module.update()

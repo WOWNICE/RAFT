@@ -3,6 +3,9 @@ import torch
 import torch.nn as nn
 import collections
 
+from models import WRAPPERS
+
+@WRAPPERS.register_module('empty')
 class EmptyWrapper(nn.Module):
     def __init__(self, model, **kwargs):
         super(EmptyWrapper, self).__init__()
@@ -23,6 +26,7 @@ class EmptyWrapper(nn.Module):
     def update(self):
         pass
 
+@WRAPPERS.register_module('ema')
 class EmaWrapper(nn.Module):
     def __init__(self, model, opt='sgd', lr=4e-3, momentum=0.9, **kwargs):
         super(EmaWrapper, self).__init__()
@@ -77,6 +81,8 @@ class EmaWrapper(nn.Module):
         elif self.opt == 'fix':
             pass
 
+
+@WRAPPERS.register_module('freezepred')
 class FreezePredWrapper(EmaWrapper):
     def __init__(self, model, opt='sgd', lr=4e-3, momentum=0.9, **kwargs):
         super(FreezePredWrapper, self).__init__(
@@ -90,6 +96,7 @@ class FreezePredWrapper(EmaWrapper):
             param.requires_grad = False
 
 
+@WRAPPERS.register_module('optimalpred')
 class OptimalPredWrapper(FreezePredWrapper):
     def __init__(self, model, opt='sgd', lr=4e-3, momentum=0.9, pred_path='', **kwargs):
         super(OptimalPredWrapper, self).__init__(
@@ -110,6 +117,7 @@ class OptimalPredWrapper(FreezePredWrapper):
             self.model.pred.load_state_dict(pred_dic)
 
 
+@WRAPPERS.register_module('randpred')
 class RandPredWrapper(EmaWrapper):
     def __init__(self, model, opt='sgd', lr=4e-3, momentum=0.9, **kwargs):
         super(RandPredWrapper, self).__init__(
@@ -130,26 +138,3 @@ class RandPredWrapper(EmaWrapper):
         super(RandPredWrapper, self).update()
         self.update_pred()
 
-
-class SlowRandPredWrapper(EmaWrapper):
-    def __init__(self, model, opt='sgd', lr=4e-3, momentum=0.9, **kwargs):
-        super(SlowRandPredWrapper, self).__init__(
-            model=model,
-            opt=opt,
-            lr=lr,
-            momentum=momentum
-        )
-
-    def update_pred(self):
-        def reset_param(layer):
-            if hasattr(layer, 'reset_parameters'):
-                dic = layer.state_dict()
-                layer.reset_parameters()
-                for name, param in layer.named_parameters():
-                    param.data = 0.004*param.data + 0.996*dic[name].data
-
-        self.model.pred.apply(reset_param)
-
-    def update(self):
-        super(SlowRandPredWrapper, self).update()
-        self.update_pred()

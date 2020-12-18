@@ -6,12 +6,13 @@ from kornia import augmentation as augs
 from kornia import filters, color
 
 # mapping from the model name to the model constructor
-from models import name_model_dic as func_dic
 from models.main import RandomApply
 
 import scipy.spatial as spatial
 
 from models.main.byol import Model as Byol
+
+from models import *
 
 
 class Model(Byol):
@@ -21,9 +22,9 @@ class Model(Byol):
     def __init__(
             self,
             # models
-            encoder='resnet18',
-            projector='byol-proj',
-            predictor='byol-proj',
+            encoder='resnet50',
+            projector='2layermlpbn',
+            predictor='2layermlpbn',
             normalization='l2',
             # shapes
             input_shape=(3, 224, 224),

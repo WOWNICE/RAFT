@@ -4,7 +4,7 @@ import torch.nn as nn
 import torchvision
 from torchvision import transforms
 
-from dataset_wrappers import TransformsSimCLR
+from dataset_apis import TransformsSimCLR
 
 def load_trainset():
     """

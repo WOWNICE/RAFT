@@ -1,31 +1,20 @@
-import numpy as np
-import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
+
+from utils.registry import Registry
+
+__all__ = ['WRAPPERS', 'HEADS', 'ENCODERS', 'FUNCS']
 
 
+WRAPPERS = Registry('wrapper')
+HEADS = Registry('heads')
+ENCODERS = Registry('encoders')
+FUNCS = Registry('functions')
 
-from models.submodels.resnets import resnet18, resnet34, resnet50
+FUNCS.register_module('l2')(F.normalize)
+FUNCS.register_module('I')(nn.Identity())
 
-from models.submodels.mlps import *
-
-name_model_dic = {
-    # encoder networks
-    'resnet18': resnet18,
-    'resnet34': resnet34,
-    'resnet50': resnet50,
-
-    # projector and predictors
-    'byol-proj': ProjectorByol,
-    'byol-proj-nobn': ProjectorByolNoBN,
-    'simclr-proj': ProjectorSimClr,
-    'linear-proj': ProjectorLinear,
-    'linear-proj-nobn': ProjectorLinearNoBN,
-    'identity-proj': nn.Identity,
-
-    # emas
-
-    # normalization methods
-    'l2':       F.normalize,
-    'I':        nn.Identity()
-}
+# whenever creating a new module, register it here.
+from .submodels.resnets import *
+from .submodels.mlps import *
+from .wrappers.weight_wrapper import *

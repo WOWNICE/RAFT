@@ -4,7 +4,7 @@ import torch.nn as nn
 import torchvision
 from torchvision import transforms
 
-from dataset_wrappers import TransformsSimCLR
+from dataset_apis import TransformsSimCLR
 
 def load_trainset():
     """
@@ -12,7 +12,7 @@ def load_trainset():
     :return:
     """
     return torchvision.datasets.ImageFolder(
-        './data/imagenet/train',
+        './data/subimagenet/train',
         transform=TransformsSimCLR(224)
         )
 
@@ -23,7 +23,7 @@ def load_eval_trainset():
     :return:
     """
     return torchvision.datasets.ImageFolder(
-        root='./data/imagenet/train',
+        root='./data/subimagenet/train',
         transform=torchvision.transforms.Compose([
                 torchvision.transforms.RandomResizedCrop(size=224),
                 torchvision.transforms.RandomHorizontalFlip(),  # with 0.5 probability
@@ -38,7 +38,7 @@ def load_testset():
     :return:
     """
     return torchvision.datasets.ImageFolder(
-        root='./data/imagenet/val',
+        root='./data/subimagenet/val',
         transform=torchvision.transforms.Compose([
                 transforms.Resize(256),
                 transforms.CenterCrop(224),

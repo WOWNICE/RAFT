@@ -6,7 +6,7 @@ from kornia import augmentation as augs
 from kornia import filters, color
 
 # mapping from the model name to the model constructor
-from models import name_model_dic as func_dic
+from models import *
 from models.main import RandomApply
 
 import scipy.spatial as spatial
@@ -19,8 +19,8 @@ class Model(nn.Module):
     def __init__(
             self,
             # models
-            encoder='resnet18',
-            projector='byol-proj',
+            encoder='resnet50',
+            projector='2layermlp',
             normalization='l2',
 
             # shapes
@@ -41,7 +41,7 @@ class Model(nn.Module):
         super(Model, self).__init__()
 
         # load the function from the name
-        encoder, projector, normalization = func_dic[encoder], func_dic[projector], func_dic[normalization]
+        encoder, projector, normalization = ENCODERS[encoder], HEADS[projector], FUNCS[normalization]
 
         #################################
         # online network
