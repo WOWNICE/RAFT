@@ -4,33 +4,35 @@ import torch.nn as nn
 import collections
 
 from models import WRAPPERS
+from models.wrappers import BaseWrapper
 
 @WRAPPERS.register_module('empty')
-class EmptyWrapper(nn.Module):
+class EmptyWrapper(BaseWrapper):
     def __init__(self, model, **kwargs):
-        super(EmptyWrapper, self).__init__()
-        self.model = model
+        super(EmptyWrapper, self).__init__(model=model)
 
-    def forward(self, x1, x2):
-        return self.model(x1, x2)
+    def forward(self, *input):
+        loss = self.model(*input)
+        self.update()
+        return loss
 
     def estimate_align(self):
-        return self.model.estimate_align()
+        return self.module.estimate_align()
 
     def estimate_uniform(self):
-        return self.model.estimate_uniform()
+        return self.module.estimate_uniform()
 
     def estimate_cross(self):
-        return self.model.estimate_cross()
+        return self.module.estimate_cross()
 
     def update(self):
         pass
 
+
 @WRAPPERS.register_module('ema')
-class EmaWrapper(nn.Module):
+class EmaWrapper(EmptyWrapper):
     def __init__(self, model, opt='sgd', lr=4e-3, momentum=0.9, **kwargs):
-        super(EmaWrapper, self).__init__()
-        self.model = model
+        super(EmaWrapper, self).__init__(model=model)
 
         params = list(model.target.parameters())+list(model.target_proj.parameters())
 
@@ -45,18 +47,6 @@ class EmaWrapper(nn.Module):
             self.optimizer = torch.optim.SGD(lr=lr, params=params, momentum=momentum)
         else:
             self.optimizer = torch.optim.SGD(lr=lr, params=params)
-
-    def forward(self, x1, x2):
-        return self.model(x1, x2)
-
-    def estimate_align(self):
-        return self.model.estimate_align()
-
-    def estimate_uniform(self):
-        return self.model.estimate_uniform()
-
-    def estimate_cross(self):
-        return self.model.estimate_cross()
 
     def update(self):
         # if ema is included

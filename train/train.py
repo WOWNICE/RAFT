@@ -139,8 +139,6 @@ def train(gpu, args):
     for epoch in range(args.reload_epoch, args.epochs+args.reload_epoch):
         current_time = time.time()
         metrics = defaultdict(list)
-        if gpu == 0:
-            ctime = time.time()
         for step, ((x1, x2), labels) in enumerate(train_loader):
             # train the online to approximate the target.
             # each round is formed of 100 epoch
@@ -198,8 +196,8 @@ def train(gpu, args):
 
                 if gpu == 0:
                     print(f"Saving model at epoch {epoch}")
-                    # ddp->ema_wrapper->model
-                    torch.save(model.module.model.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
+                    # model -> [weight_wrapper, ..., foo_wrapper] -> ddp_wrapper
+                    torch.save(model.module.module.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
 
                 # let other workers wait until model is finished
                 # dist.barrier()
@@ -207,7 +205,8 @@ def train(gpu, args):
 
     # save your improved network
     if gpu == 0:
-        torch.save(model.module.model.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
+        # model -> [weight_wrapper, ..., foo_wrapper] -> ddp_wrapper
+        torch.save(model.module.module.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
 
     cleanup()
 

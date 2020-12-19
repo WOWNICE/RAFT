@@ -11,6 +11,8 @@ from models.main import RandomApply
 
 import scipy.spatial as spatial
 
+import warnings
+
 
 class Model(nn.Module):
     """
@@ -132,7 +134,9 @@ class Model(nn.Module):
             batch_slice_size = bs // self.w_split
             remain = bs % batch_slice_size
             if min(batch_slice_size, remain if remain!=0 else float('inf')) < 1.9 * fs:
-                return 0 * torch.norm(self.normalize(z1), p=2)  # not making any effect
+                # return 0 * torch.norm(self.normalize(z1), p=2)  # not making any effect
+                warnings.warn('batch-slice is smaller than the dimension.', RuntimeWarning)
+
             try:
                 y1s = torch.split(z1, batch_slice_size)
                 z1s = [self.whitening(x) for x in y1s]

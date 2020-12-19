@@ -198,12 +198,12 @@ def train(gpu, args):
                 if gpu == 0:
                     print(f"Saving model at epoch {epoch}")
                     # ddp->ema_wrapper->model
-                    torch.save(model.module.model.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
+                    torch.save(model.module.module.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
 
 
     # save your improved network
     if gpu == 0:
-        torch.save(model.module.model.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
+        torch.save(model.module.module.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
 
     cleanup()
 
