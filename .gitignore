@@ -3,6 +3,8 @@ nohup.out
 *.py[cod]
 .idea
 playground.py
+data/*
+tools/_*
 
 # expect this one
 !.gitignore
