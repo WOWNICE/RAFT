@@ -6,7 +6,7 @@
 from torch import nn
 
 class BaseWrapper(nn.Module):
-    def __init__(self, model):
+    def __init__(self, model, **kwargs):
         super(BaseWrapper, self).__init__()
         self.model = model
         if hasattr(model, 'module'):

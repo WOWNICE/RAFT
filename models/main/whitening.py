@@ -20,24 +20,17 @@ class Model(nn.Module):
     """
     def __init__(
             self,
-            # models
-            encoder='resnet50',
+            encoder='resnet50',             # models
             projector='2layermlp',
             normalization='l2',
-
-            # shapes
-            input_shape=(3, 224, 224),
+            input_shape=(3, 224, 224),      # shapes
             proj_shape=(4096, 256),
-
-            # whitening operater.
-            whiten='cholesky',
+            whiten='cholesky',              # whitening operator
             whiten_grad=False,
             w_iter=1,
-            w_split=2,
+            w_split=1,
             eps=0,
-
-            # log.
-            log=False,
+            log=False,                      # log
             **kargs
     ):
         super(Model, self).__init__()
@@ -68,12 +61,32 @@ class Model(nn.Module):
 
         self.log = log
 
-        # set the transformations
-        self._set_transforms(input_shape[1])
+        self.reps = {}
+
+    def forward(self, x1, x2):
+        """
+        loss = loss_consistency + loss_cross_model + loss_cross_term
+        :param x:
+        :return: three loss
+        """
+        # generate two randomly-permutated views
+        # combine kornia and torchvision.transforms together to boost the performance
+        reps1 = self.gen_rep(x1)
+        reps2 = self.gen_rep(x2)
+
+        # generate loss
+        loss = self.gen_loss(reps1, reps2)
+
+        # register the representations to the model for future estimation
+        if self.log:
+            self.register_reps(reps1, view=1)
+            self.register_reps(reps2, view=2)
+
+        return loss
+
 
     def gen_rep(self, x):
-        view = self.train_augment(x)
-        y_online = self.online(view)
+        y_online = self.online(x)
         z_online = self.online_proj(y_online)
 
         return y_online, z_online
@@ -156,82 +169,20 @@ class Model(nn.Module):
         return loss
 
     @torch.no_grad()
-    def register_reps(self, reps1, reps2):
+    def register_reps(self, reps, view):
         """i
         register the representations to the model
         :param reps1:
         :param reps2:
         :return:
         """
-        y_online1, z_online1 = reps1
-        y_online2, z_online2 = reps2
+        y_online, z_online = reps
 
         # for estimate uniformity/alignment/others in the future
         # to save the computational cost, we only preserve up to 64 samples
 
-        batch_size = min(y_online2.shape[0], 64)
-        self.z_online1 = self.normalize(z_online1)[:batch_size,:]
-        self.z_online2 = self.normalize(z_online2)[:batch_size,:]
-
-
-    def forward(self, x1, x2):
-        """
-        loss = loss_consistency + loss_cross_model + loss_cross_term
-        :param x:
-        :return: three loss
-        """
-        # generate two randomly-permutated views
-        # combine kornia and torchvision.transforms together to boost the performance
-        reps1 = self.gen_rep(x1)
-        reps2 = self.gen_rep(x2)
-
-        # generate loss
-        loss = self.gen_loss(reps1, reps2)
-
-        # register the representations to the model for future estimation
-        if self.log:
-            self.register_reps(reps1, reps2)
-
-        return loss
-
-    @torch.no_grad()
-    def estimate_align(self):
-        """
-        Estimate the online/pred/target's alignment AFTER normalization.
-        :return:
-        """
-
-        align_online = (self.z_online1 - self.z_online2).square().mean().detach()
-
-        return align_online
-
-    @torch.no_grad()
-    def estimate_uniform(self):
-        """
-        Estimate the online/pred/target uniformity AFTER normalization.
-        :return:
-        """
-
-        def lunif(x, t=2):
-            x = x.cpu().numpy()
-            # sq_pdist = torch.pdist(x, p=2).pow(2)     # not supported in AMP
-            sq_pdist = torch.Tensor(spatial.distance.pdist(x, 'minkowski', p=2)).pow(2)
-            return sq_pdist.mul(-t).exp().mean().log()
-
-        uniform_online = 0.5 * (lunif(self.z_online1) + lunif(self.z_online2))
-
-        return uniform_online
-
-    def _set_transforms(self, resize_dim=224):
-        self.train_augment = nn.Sequential(
-            # augs.RandomResizedCrop((resize_dim, resize_dim)),           # 1
-            # augs.RandomHorizontalFlip(),                                # 2
-            # RandomApply(augs.ColorJitter(0.8, 0.8, 0.8, 0.2), p=0.8),   # 3
-            # augs.RandomGrayscale(p=0.2),                                # 4
-            # RandomApply(filters.GaussianBlur2d((3, 3), (1.5, 1.5)), p=0.1),
-            # in kornia: should be a tuple
-            # color.Normalize(mean=torch.tensor([0.485, 0.456, 0.406]), std=torch.tensor([0.229, 0.224, 0.225]))
-        )
+        batch_size = min(y_online.shape[0], 64)
+        self.reps[f'online.{view}'] = self.normalize(z_online)[:batch_size,:]
 
 
 if __name__ == '__main__':

@@ -18,3 +18,4 @@ FUNCS.register_module('I')(nn.Identity())
 from .submodels.resnets import *
 from .submodels.mlps import *
 from .wrappers.weight_wrapper import *
+from .wrappers.logger_wrapper import *

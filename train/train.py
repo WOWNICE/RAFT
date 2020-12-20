@@ -124,25 +124,31 @@ def train(gpu, args):
         model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 
     # ema wrapper should go after the amp wrapper
-    Wrapper = WRAPPERS[args.wrapper]
-    model = Wrapper(model, opt=args.ema_mode, lr=args.ema_lr, momentum=1, pred_path=args.pred_checkpoint)
+    WeightWrapper = WRAPPERS[args.weight_wrapper]
+    model = WeightWrapper(model, opt=args.ema_mode, lr=args.ema_lr, momentum=1, pred_path=args.pred_checkpoint)
     # _, model.optimizer = amp.initialize([model.model.target, model.model.target_proj], model.optimizer, opt_level="O1")
+
+    # a series of logger wrappers
+    Loggers = [WRAPPERS[x] for x in args.logger_wrappers.split('.')]
+    for Logger in Loggers:
+        model = Logger(model)
 
     # DDP wrapper for the model
     model = nn.parallel.DistributedDataParallel(model, device_ids=[gpu])
 
     if gpu == 0 and args.log == 'True':
         writer = SummaryWriter()
+        print(f"[LOG]\t{writer.log_dir}")
 
     # solver
     global_step = 0
     for epoch in range(args.reload_epoch, args.epochs+args.reload_epoch):
         current_time = time.time()
-        metrics = defaultdict(list)
+        model.module.clear()    # clear the metrics dic
         for step, ((x1, x2), labels) in enumerate(train_loader):
             # train the online to approximate the target.
             # each round is formed of 100 epoch
-            x1, x2 = x1.cuda(gpu), x2.cuda(gpu)
+            x1, x2 = x1.cuda(non_blocking=True), x2.cuda(non_blocking=True)
 
 
             for k in range(args.k):
@@ -156,46 +162,28 @@ def train(gpu, args):
             model.module.update()
 
             if gpu == 0 and args.log == 'True':
-                _, loss_alignment, _ = model.module.estimate_align()
-                _, loss_cross_model = model.module.estimate_cross()
-                _, loss_uniform, _ = model.module.estimate_uniform()
-                writer.add_scalars(
-                    "Losses/train_step",
-                    {
-                        'loss-total': loss,
-                        'loss-alignment': loss_alignment,
-                        'loss-cross-model': loss_cross_model,
-                        'loss-uniformity': loss_uniform
-                    },
-                    global_step
-                )
-
-                # append all the loss term into the dictionary.
-                metrics["loss-total"].append(loss.item())
-                metrics["loss-alignment"].append(loss_alignment.item())
-                metrics["loss-cross-model"].append(loss_cross_model.item())
-                metrics["loss-uniform"].append(loss_uniform.item())
+                model.module.estimate()
 
             global_step += 1
 
         if gpu == 0:
             # output the time training an epoch
-            print(f"Epoch No.{epoch} finished. Time used: {time.time()-current_time}")
+            print(f"[TRAIN]\t[EPOCH={epoch:04}]\t[TIME={time.time()-current_time:5.2f}s]")
 
             # write metrics to TensorBoard
             if args.log == 'True':
                 dic, var_dic = {}, {}
-                for k, v in metrics.items():
+                for k, v in model.module.metrics.items():
                     dic[k] = np.array(v).mean()
                     # var_dic[k] = np.array(v).std()
-                writer.add_scalars("Losses/epoch-loss", dic, epoch)
+                writer.add_scalars("Losses/epoch", dic, epoch)
                 # writer.add_scalars("Losses/epoch-stddev", var_dic, epoch)
 
 
             if epoch % args.checkpoint_epochs == 0:
 
                 if gpu == 0:
-                    print(f"Saving model at epoch {epoch}")
+                    print(f"[CKPT]\t[EPOCH={epoch:04}]\t[PATH={args.checkpoint_dir}/{args.rand_seed}]")
                     # model -> [weight_wrapper, ..., foo_wrapper] -> ddp_wrapper
                     torch.save(model.module.module.state_dict(), f"./{args.checkpoint_dir}/{args.rand_seed}/{args.encoder}_{args.projector}_{args.predictor}_{epoch}.pt")
 
@@ -232,8 +220,10 @@ if __name__ == '__main__':
                         help='output dimension of the mlp.')
     parser.add_argument('--normalization', default='l2', type=str, metavar='N',
                         help='normalization function')
-    parser.add_argument('--wrapper', default='ema', type=str, metavar='N',
+    parser.add_argument('--weight-wrapper', default='ema', type=str, metavar='N',
                         help='registered in models.WRAPPERS')
+    parser.add_argument('--logger-wrappers', default='emptylogger', type=str, metavar='N',
+                        help="a list of loggers, separated by '.'")
 
 
     # sub-process info
@@ -312,7 +302,7 @@ if __name__ == '__main__':
                         help='the epsilon value stablizing the decomposition.')
     parser.add_argument('--w-iter', default=1, type=int, metavar='N',
                         help='time of repeating the whitening loss for stablizing the loss.')
-    parser.add_argument('--w-split', default=2, type=int, metavar='N',
+    parser.add_argument('--w-split', default=1, type=int, metavar='N',
                         help='split total batch into w_split sub-batches.')
 
     args = parser.parse_args()
@@ -321,5 +311,5 @@ if __name__ == '__main__':
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = args.port
 
-    print('Spawning the subprocesses...')
+    print(f'[SPAWN]\t[PORT={args.port}]')
     mp.spawn(train, nprocs=args.gpus, args=(args,), join=True)
