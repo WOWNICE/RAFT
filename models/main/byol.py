@@ -142,7 +142,7 @@ class Model(nn.Module):
             self.register_reps(reps1, num=1)
             self.register_reps(reps2, num=2)
 
-        return lossi
+        return loss
 
 
 if __name__ == '__main__':
