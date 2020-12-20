@@ -146,9 +146,9 @@ class Model(nn.Module):
             # handle possible exceptions when batch_slice_size < 2*dim
             batch_slice_size = bs // self.w_split
             remain = bs % batch_slice_size
-            if min(batch_slice_size, remain if remain!=0 else float('inf')) < 1.9 * fs:
-                # return 0 * torch.norm(self.normalize(z1), p=2)  # not making any effect
-                warnings.warn('batch-slice is smaller than the dimension.', RuntimeWarning)
+            if min(batch_slice_size, remain if remain!=0 else float('inf')) <= fs:
+                warnings.warn('batch-slice is leq than the dimension, skipping this batch.', RuntimeWarning)
+                return 0 * torch.norm(self.normalize(z1), p=2)  # not making any effect
 
             try:
                 y1s = torch.split(z1, batch_slice_size)
