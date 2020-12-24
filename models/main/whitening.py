@@ -110,6 +110,7 @@ class Model(nn.Module):
         for _ in range(self.w_iter):
             perm = torch.randperm(fs)
             z1, z2 = z_online1[:, perm][:, :w_fs], z_online2[:, perm][:, :w_fs]
+            # z1, z2 = z_online1, z_online2
 
             if bs <= z1.shape[1]:
                 warnings.warn('sliced feature size <= dimension, might cause singular covariance matrix.', RuntimeWarning)
@@ -117,10 +118,12 @@ class Model(nn.Module):
                 w_z1 = _whiten(z1, eps=self.eps, whiten_method=self.whiten)
                 w_z2 = _whiten(z2, eps=self.eps, whiten_method=self.whiten)
             except:
-                raise Exception(f'bs={bs}, w_fs={w_fs}.')
+                print(f'bs={bs}, w_fs={w_fs}, causing singular matrix. matching to gaussian instead.')
+                w_z1 = torch.normal(0, 1, size=z1.shape).cuda()
+                w_z2 = torch.normal(0, 1, size=z2.shape).cuda()
 
-            loss += 0.5 * ((self.normalize(z1) - self.normalize(w_z1)).square().mean() +
-                           (self.normalize(z2) - self.normalize(w_z2)).square().mean())
+            loss += 0.5 * ((self.normalize(z1) - self.normalize(w_z2)).square().mean() +
+                           (self.normalize(z2) - self.normalize(w_z1)).square().mean())
 
         loss /= self.w_iter
 

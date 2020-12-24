@@ -96,19 +96,6 @@ def eval_knn(model, args):
 def load_tensor_single(gpu, model, train_loader, test_loader, k, queue, exit_queue):
     model = model.cuda(gpu)
 
-    # training features
-    xs, ys = [], []
-    for step, (images, labels) in enumerate(train_loader):
-        images, labels = images.cuda(gpu, non_blocking=True), labels.cuda(gpu, non_blocking=True)
-
-        reps = model(images)
-
-        xs.append(reps)
-        ys.append(labels)
-
-    train_x, train_y = torch.cat(xs), torch.cat(ys)
-    del xs, ys
-
     # test features
     xs, ys = [], []
     for step, (images, labels) in enumerate(test_loader):
@@ -122,8 +109,20 @@ def load_tensor_single(gpu, model, train_loader, test_loader, k, queue, exit_que
     test_x, test_y = torch.cat(xs), torch.cat(ys)
     del xs, ys
 
+    # training features
+    ds, ys = [], []
+    for step, (images, labels) in enumerate(train_loader):
+        images, labels = images.cuda(gpu, non_blocking=True), labels.cuda(gpu, non_blocking=True)
+
+        reps = model(images)
+
+        ds.append(torch.cdist(test_x, reps))
+        ys.append(labels)
+
+    d, train_y = torch.cat(ds, dim=1), torch.cat(ys)
+    del ds, ys
+
     # compute local knn
-    d = torch.cdist(test_x, train_x)
     topk = torch.topk(d, k=k, dim=1, largest=False)
     labels = train_y[topk.indices]
     distances = topk.values
