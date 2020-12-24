@@ -26,9 +26,8 @@ class Model(nn.Module):
             input_shape=(3, 224, 224),      # shapes
             proj_shape=(4096, 256),
             whiten='cholesky',              # whitening operator
-            whiten_grad=False,
             w_iter=1,
-            w_split=1,
+            w_fs=64,
             eps=0,
             log=False,                      # log
             **kargs
@@ -54,9 +53,8 @@ class Model(nn.Module):
 
         self.normalize = normalization
         self.whiten = whiten
-        self.whiten_grad = whiten_grad
         self.w_iter = w_iter
-        self.w_split = w_split
+        self.w_fs = w_fs
         self.eps = eps
 
         self.log = log
@@ -91,40 +89,6 @@ class Model(nn.Module):
 
         return y_online, z_online
 
-    def whitening(self, x):
-        x = x - x.mean(dim=0, keepdims=True)
-        # supppose x is already 0-mean
-        x_cov = torch.mm(x.T, x) / (x.shape[0] - 1)
-
-        # make sure it's full-ranked.
-        x_cov = (1-self.eps) * x_cov + self.eps * torch.eye(x.shape[1]).cuda()
-
-        if self.whiten_grad:
-            if self.whiten == 'cholesky':
-                # cholesky is default
-                L = torch.cholesky(x_cov)
-                W = torch.inverse(L).T
-                return torch.mm(x, W)
-            elif self.whiten == 'bn':
-                x_var = x.square().mean(dim=0)
-                return x / torch.sqrt(x_var + self.eps)
-            else:
-                raise NotImplementedError(f"{self.whiten} is not implemented yet.")
-
-        # if the gradient of the cholsky not passed to the encoder.
-        with torch.no_grad():
-            if self.whiten == 'cholesky':
-                # cholesky is default
-                L = torch.cholesky(x_cov)
-                W = torch.inverse(L).T
-            elif self.whiten == 'bn':
-                x_var = x.square().mean(dim=0)
-                return x / torch.sqrt(x_var + self.eps)
-            else:
-                raise NotImplementedError(f"{self.whiten} is not implemented yet.")
-
-        return torch.mm(x, W)
-
     def gen_loss(self, reps1, reps2):
         """
         Different ways of generating losses, overwrites it if needed.
@@ -138,39 +102,33 @@ class Model(nn.Module):
         # perform whitening procedure.
         bs, fs = z_online1.shape
         loss = 0
-        total_splits = 0
+
+        # Sliced Whitening,
+        # to prevent singular covariance matrix, w_fs < bs-1
+        w_fs = min(bs-1, fs, self.w_fs)
+
         for _ in range(self.w_iter):
-            perm = torch.randperm(bs)
-            z1, z2 = z_online1[perm], z_online2[perm]
+            perm = torch.randperm(fs)
+            z1, z2 = z_online1[:, perm][:, :w_fs], z_online2[:, perm][:, :w_fs]
 
-            # handle possible exceptions when batch_slice_size < 2*dim
-            batch_slice_size = bs // self.w_split
-            remain = bs % batch_slice_size
-            if min(batch_slice_size, remain if remain!=0 else float('inf')) <= fs:
-                warnings.warn('batch-slice is leq than the dimension, skipping this batch.', RuntimeWarning)
-                return 0 * torch.norm(self.normalize(z1), p=2)  # not making any effect
-
+            if bs <= z1.shape[1]:
+                warnings.warn('sliced feature size <= dimension, might cause singular covariance matrix.', RuntimeWarning)
             try:
-                y1s = torch.split(z1, batch_slice_size)
-                z1s = [self.whitening(x) for x in y1s]
-                y2s = torch.split(z2, batch_slice_size)
-                z2s = [self.whitening(x) for x in y2s]
+                w_z1 = _whiten(z1, eps=self.eps, whiten_method=self.whiten)
+                w_z2 = _whiten(z2, eps=self.eps, whiten_method=self.whiten)
             except:
-                raise Exception(f'bs={bs}, fs={fs}, batch-slice-size={batch_slice_size}, remain={remain}')
-            total_splits += len(z1s)
+                raise Exception(f'bs={bs}, w_fs={w_fs}.')
 
-            # adding the stop-gradient
-            for i in range(len(y1s)):
-                loss += 0.5 * ((self.normalize(y1s[i]) - self.normalize(z2s[i].detach())).square().mean() +
-                               (self.normalize(y2s[i]) - self.normalize(z1s[i].detach())).square().mean())
+            loss += 0.5 * ((self.normalize(z1) - self.normalize(w_z1)).square().mean() +
+                           (self.normalize(z2) - self.normalize(w_z2)).square().mean())
 
-        loss /= (self.w_iter * total_splits)
+        loss /= self.w_iter
 
         return loss
 
     @torch.no_grad()
     def register_reps(self, reps, view):
-        """i
+        """
         register the representations to the model
         :param reps1:
         :param reps2:
@@ -183,6 +141,37 @@ class Model(nn.Module):
 
         batch_size = min(y_online.shape[0], 64)
         self.reps[f'online.{view}'] = self.normalize(z_online)[:batch_size,:]
+
+
+@torch.no_grad()
+def _whiten(x, eps, whiten_method='cholesky'):
+    """
+
+    :param x: input tensor x
+    :param eps:
+        whiten_method=bn:       eps=[sqrt(var + eps)]
+        whiten_method=others:   eps=[(1-eps)*cov + eps*eye]
+    :param whiten_method:
+        whitening methodm, default=cholesky
+    :return:
+    """
+    assert (whiten_method in ['cholesky', 'bn', 'zca'])
+    x = x - x.mean(dim=0, keepdims=True)
+    x_cov = torch.mm(x.T, x) / (x.shape[0] - 1)
+
+    # make sure it's full-ranked.
+    x_cov = (1 - eps) * x_cov + eps * torch.eye(x.shape[1]).cuda()
+
+    if whiten_method == 'cholesky':
+        # cholesky is default
+        L = torch.cholesky(x_cov)
+        W = torch.inverse(L).T
+        return torch.mm(x, W)
+    elif whiten_method == 'bn':
+        x_var = x.square().mean(dim=0)
+        return x / torch.sqrt(x_var + eps)
+    else:
+        raise NotImplementedError(f"{whiten_method} is not implemented yet.")
 
 
 if __name__ == '__main__':

@@ -41,16 +41,6 @@ def train(gpu, args):
 
     torch.cuda.set_device(gpu)
 
-    # set up the dataset
-    # dataset = DatasetDistributed(
-    #     data_path='./experiments/cifar10/data',
-    #     resize_shape=(args.resize_dim, args.resize_dim),
-    #     batch_size=args.batch_size,
-    #     device=gpu,
-    #     world_size=args.world_size,
-    #     rank=rank
-    # )
-
     trainset = load_trainset()
 
     # trainset = DistributedIndicesWrapper(trainset, list(range(5000)))
@@ -93,9 +83,8 @@ def train(gpu, args):
         # whitening arguments
         eps=args.whiten_eps,
         whiten=args.whiten,
-        whiten_grad=args.whiten_grad=='True',
         w_iter = args.w_iter,
-        w_split = args.w_split
+        w_fs = args.w_fs
     )
 
     # reload the checkpoint
@@ -296,14 +285,12 @@ if __name__ == '__main__':
     # setting for the whitening model
     parser.add_argument('--whiten', default='cholesky', type=str, metavar='N',
                         help='which whitening method to use')
-    parser.add_argument('--whiten-grad', default='True', type=str, metavar='N',
-                        help='whether the gradient of decomposition is passed to the encoder.')
     parser.add_argument('--whiten-eps', default=0., type=float, metavar='N',
                         help='the epsilon value stablizing the decomposition.')
     parser.add_argument('--w-iter', default=1, type=int, metavar='N',
                         help='time of repeating the whitening loss for stablizing the loss.')
-    parser.add_argument('--w-split', default=1, type=int, metavar='N',
-                        help='split total batch into w_split sub-batches.')
+    parser.add_argument('--w-fs', default=32, type=int, metavar='N',
+                        help='sliced feature size of the representations')
 
     args = parser.parse_args()
     # print(args)

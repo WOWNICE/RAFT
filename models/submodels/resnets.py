@@ -38,6 +38,21 @@ class MyResNet18(nn.Module):
     def forward(self, x):
         return self.module(x)
 
+@ENCODERS.register_module('smallresnet18')
+class MySmallResNet18(nn.Module):
+    def __init__(self):
+        super(MySmallResNet18, self).__init__()
+        self.module = resnet18()
+        self.module.fc = nn.Identity()
+
+        # additional for the cifar10 & cifar100, borrowed from the
+        self.module.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.maxpool = nn.Identity()
+
+
+    def forward(self, x):
+        return self.module(x)
+
 
 if __name__ == '__main__':
     print(ENCODERS)

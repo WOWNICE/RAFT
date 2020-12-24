@@ -2,53 +2,67 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-import numpy as np
-import torch
-import torch.nn as nn
-
 import collections
 import importlib
 import os
-from datetime import datetime
 import argparse
 from tqdm import tqdm
-
-import torch.multiprocessing as mp
-import torch.distributed as dist
-
-from collections import defaultdict
 
 # supervision of training
 from torch.utils.tensorboard import SummaryWriter
 
-from models import name_model_dic
+import torch.multiprocessing as mp
+import torch.distributed as dist
 
-dataset_classes = {
-    'cifar10':      10,
-    'cifar100':     100,
-    'subimagenet': 100,
-    'imagenet': 1000,
-}
+from torch.utils.data.sampler import SubsetRandomSampler
 
-def eval(online, args):
+# supervision of training
+from torch.utils.tensorboard import SummaryWriter
+
+from .utils import *
+
+def cleanup():
+    dist.destroy_process_group()
+
+
+def eval(gpu, online, args):
+    # dist stuff
+    rank = args.nr * args.gpus + gpu
+    dist.init_process_group(backend='nccl', init_method='env://', world_size=args.world_size, rank=rank)
     torch.manual_seed(args.rand_seed)
 
+    torch.cuda.set_device(gpu)
+
+    # mocking input and get rep-dim dynamically.
     mock_x = torch.from_numpy(np.zeros(shape=[4, 3, args.resize_dim, args.resize_dim])).float()
     mock_y = online(mock_x)
     rep_dim = mock_y.size(1)
 
-    lr_model = nn.Linear(rep_dim, dataset_classes[args.dataset]).cuda(args.gpu)
-    online = online.cuda(args.gpu)
+    lr_model = nn.Linear(rep_dim, dataset_classes[args.dataset]).cuda()
+    lr_model.bias.data.zero_()
+    online = online.cuda()
     online.eval() #disable the bn&dropout
 
-    criterion = nn.CrossEntropyLoss().cuda(args.gpu)
+    # DDP wrapper for the model
+    # online = nn.parallel.DistributedDataParallel(online, device_ids=[gpu])
+    lr_model = nn.parallel.DistributedDataParallel(lr_model, device_ids=[gpu])
+
+    # criterion and optimizer
+    criterion = nn.CrossEntropyLoss().cuda()
     optimizer = torch.optim.Adam(lr_model.parameters(), lr=args.lr)
 
+    #############################
+    # TRAINING
     # set up the dataset
-    load_trainset = getattr(importlib.import_module(f'dataset_wrappers.{args.dataset}'), 'load_eval_trainset')
+    load_trainset = getattr(importlib.import_module(f'dataset_apis.{args.dataset}'), 'load_eval_trainset')
     trainset = load_trainset()
-    load_testset = getattr(importlib.import_module(f'dataset_wrappers.{args.dataset}'), 'load_testset')
-    testset = load_testset()
+
+    train_sampler = torch.utils.data.distributed.DistributedSampler(
+        trainset,
+        num_replicas=args.world_size,
+        rank=rank,
+        shuffle=True,
+    )
 
     train_loader = torch.utils.data.DataLoader(
         trainset,
@@ -56,7 +70,48 @@ def eval(online, args):
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=True,
+        sampler=train_sampler
     )
+
+    if gpu == 0:
+        writer = SummaryWriter()
+        print(f"[LOG]\t{writer.log_dir}")
+
+    metrics = {}
+    for epoch in tqdm(range(args.epochs)):
+        # train the linear model
+        correct_top1, correct_top5, total_samples = 0, 0, 0
+        for step, (images, labels) in enumerate(train_loader):
+
+            # there is additional data augmentation scheme for the
+            images, labels = images.cuda(non_blocking=True), labels.cuda(non_blocking=True)
+
+            with torch.no_grad():
+                reps = online(images)
+
+            logits = lr_model(reps)
+
+            loss = criterion(logits, labels)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # correctly predicted sample number
+            top1, top5 = correct_k(logits, labels, (1, 5))
+            correct_top1 += top1
+            correct_top5 += top5
+            total_samples += labels.size(0)
+
+        metrics['train-top1'] = 100 * correct_top1 / total_samples
+        metrics['train-top5'] = 100 * correct_top5 / total_samples
+
+        if gpu == 0:
+            writer.add_scalars('accs(%)', metrics, epoch)
+
+    ##############################
+    # TESTING
+    load_testset = getattr(importlib.import_module(f'dataset_apis.{args.dataset}'), 'load_testset')
+    testset = load_testset()
 
     test_loader = torch.utils.data.DataLoader(
         testset,
@@ -66,89 +121,31 @@ def eval(online, args):
         pin_memory=True,
     )
 
-    writer = SummaryWriter()
-    last_epoch_accs = []
+    correct_top1, correct_top5, total_samples = 0, 0, 0
+    for step, (images, labels) in enumerate(test_loader):
+        images, labels = images.cuda(non_blocking=True), labels.cuda(non_blocking=True)
 
-    for epoch in tqdm(range(args.epochs)):
-        metrics = {}
-        # train the linear model
-        total_samples = 0
-        correct_samples = 0
-        for step, (images, labels) in enumerate(train_loader):
-
-            # there is additional data augmentation scheme for the
-            images, labels = images.cuda(args.gpu), labels.cuda(args.gpu)
-
-            with torch.no_grad():
-                reps = online(images)
+        with torch.no_grad():
+            reps = online(images)
 
             logits = lr_model(reps)
 
             # correctly predicted sample number
-            correct_samples += (logits.argmax(1) == labels).sum().item()
+            top1, top5 = correct_k(logits, labels, topk=(1, 5))
+            correct_top1 += top1
+            correct_top5 += top5
             total_samples += labels.size(0)
 
-            loss = criterion(logits, labels)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+    top1_acc = (correct_top1 / total_samples).cpu().numpy()[0]
+    top5_acc = (correct_top5 / total_samples).cpu().numpy()[0]
 
-        metrics['train-accuracy'] = correct_samples/total_samples
+    if gpu == 0:
+        print(f"[TEST]\t[TOP1={top1_acc*100.:3.2f}%]\t[TOP5={top5_acc*100.:3.2f}%]")
 
-        total_samples = 0
-        correct_samples = 0
-
-        for step, (images, labels) in enumerate(test_loader):
-            images, labels = images.cuda(args.gpu), labels.cuda(args.gpu)
-
-            with torch.no_grad():
-                reps = online(images)
-
-                logits = lr_model(reps)
-
-                # correctly predicted sample number
-                correct_samples += (logits.argmax(1) == labels).sum().item()
-                total_samples += labels.size(0)
-
-        metrics['test-accuracy'] = correct_samples / total_samples
-
-        last_epoch_accs.append(correct_samples / total_samples)
-        if len(last_epoch_accs) > 10:
-            last_epoch_accs = last_epoch_accs[1:]
-
-        # write it into
-        writer.add_scalars('accuracy', metrics, epoch)
-
-    print(f'Accuracy of model {args.checkpoint}: {100*np.array(last_epoch_accs).mean():.2f}±{100*np.array(last_epoch_accs).std():.2f}')
+    cleanup()
 
 
-def load_model(model_checkpoint, encoder='resnet18', online=True, projector='', predictor=''):
-    # load the evaluate
-    dic = torch.load(model_checkpoint, map_location=torch.device('cpu'))
 
-    # load the online/target param in a new state dic
-    online_param = collections.OrderedDict()
-    target_param = collections.OrderedDict()
-
-    for k, v in dic.items():
-        if 'online.' in k:
-            online_param[k[7:]] = v
-        elif 'target.' in k:
-            target_param[k[7:]] = v
-
-    encoder = name_model_dic[encoder]()
-    if online:
-        encoder.load_state_dict(online_param)
-    else:
-        encoder.load_state_dict(target_param)
-
-    components = [encoder]
-    # TODO: support evaluation on projector & predictor
-    # if projector:
-    #     model.append(name_model_dic[projector]())
-
-    model = nn.Sequential(*components)
-    return model
 
 
 if __name__ == '__main__':
@@ -163,8 +160,7 @@ if __name__ == '__main__':
     parser.add_argument('--predictor', default='', type=str, metavar='N',
                         help='the projector type, if empty, then evaluate w/o predictor')
 
-    parser.add_argument('--gpu', default=0, type=int, metavar='N',
-                        help='which gpu to use in evaluation')
+    # training details
     parser.add_argument('--epochs', default=100, type=int, metavar='N',
                         help='number of total epochs to train the linear model')
     parser.add_argument('--batch-size', default=512, type=int, metavar='N',
@@ -182,12 +178,28 @@ if __name__ == '__main__':
     parser.add_argument('--eval-mode', default='online', type=str, metavar='N',
                         help='which model to be evaluated.')
 
+    # sub-process info
+    parser.add_argument('-n', '--nodes', default=1, type=int, metavar='N',
+                        help='number of data loading workers (default: 4)')
+    parser.add_argument('-g', '--gpus', default=1, type=int,
+                        help='number of gpus per node')
+    parser.add_argument('-nr', '--nr', default=0, type=int,
+                        help='ranking within the nodes')
+    parser.add_argument('--port', default='8010', type=str, metavar='N',
+                        help='port number')
+
     args = parser.parse_args()
+
+    args.world_size = args.gpus * args.nodes
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = args.port
 
     # used for estimating the random baseline.
     if args.eval_mode == 'rand':
-        model = name_model_dic[args.encoder]()
+        print(f"[LOAD]\trandom baseline")
+        model = ENCODERS[args.encoder]()
     else:
+        print(f"[LOAD]\t{args.checkpoint}")
         model = load_model(
             model_checkpoint=args.checkpoint,
             encoder=args.encoder,
@@ -197,6 +209,9 @@ if __name__ == '__main__':
         )
 
     # eval args
-    eval(model, args)
+    # eval(model, args)
+
+    print(f'[SPAWN]\t[PORT={args.port}]')
+    mp.spawn(eval, nprocs=args.gpus, args=(model, args,), join=True)
 
 
