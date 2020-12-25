@@ -94,12 +94,13 @@ def eval_knn(model, args):
 
 @torch.no_grad()
 def load_tensor_single(gpu, model, train_loader, test_loader, k, queue, exit_queue):
-    model = model.cuda(gpu)
+    torch.cuda.set_device(gpu) # deals with imbalanced gpu usage.
+    model = model.cuda()
 
     # test features
     xs, ys = [], []
     for step, (images, labels) in enumerate(test_loader):
-        images, labels = images.cuda(gpu, non_blocking=True), labels.cuda(gpu, non_blocking=True)
+        images, labels = images.cuda(non_blocking=True), labels.cuda(non_blocking=True)
 
         reps = model(images)
 
@@ -112,7 +113,7 @@ def load_tensor_single(gpu, model, train_loader, test_loader, k, queue, exit_que
     # training features
     ds, ys = [], []
     for step, (images, labels) in enumerate(train_loader):
-        images, labels = images.cuda(gpu, non_blocking=True), labels.cuda(gpu, non_blocking=True)
+        images, labels = images.cuda(non_blocking=True), labels.cuda(non_blocking=True)
 
         reps = model(images)
 
@@ -135,11 +136,11 @@ def load_tensor_single(gpu, model, train_loader, test_loader, k, queue, exit_que
     while True:
         allow_exit = exit_queue.get()
         if allow_exit != gpu:
-            # print(f'proc.{gpu} get key.{allow_exit}, put it back.')
+            print(f'proc.{gpu} get key.{allow_exit}, put it back.')
             exit_queue.put(allow_exit)
             time.sleep(1)
         else:
-            # print(f'proc.{gpu} get key.{allow_exit}, exiting.')
+            print(f'proc.{gpu} get key.{allow_exit}, exiting.')
             break
 
     return

@@ -58,7 +58,8 @@ def train(gpu, args):
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=True,
-        sampler=train_sampler
+        sampler=train_sampler,
+        drop_last=True
     )
 
     # model
@@ -83,8 +84,9 @@ def train(gpu, args):
         # whitening arguments
         eps=args.whiten_eps,
         whiten=args.whiten,
-        w_iter = args.w_iter,
-        w_fs = args.w_fs
+        w_iter=args.w_iter,
+        w_fs=args.w_fs,
+        queue_size=args.q_size
     )
 
     # reload the checkpoint
@@ -291,6 +293,9 @@ if __name__ == '__main__':
                         help='time of repeating the whitening loss for stablizing the loss.')
     parser.add_argument('--w-fs', default=32, type=int, metavar='N',
                         help='sliced feature size of the representations')
+    parser.add_argument('--q-size', default=2048, type=int, metavar='N',
+                        help='sliced feature size of the representations')
+
 
     args = parser.parse_args()
     # print(args)

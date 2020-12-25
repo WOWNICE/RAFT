@@ -2,14 +2,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from kornia import augmentation as augs
-from kornia import filters, color
-
 # mapping from the model name to the model constructor
 from models import *
-from models.main import RandomApply
-
-import scipy.spatial as spatial
 
 import warnings
 
@@ -26,8 +20,9 @@ class Model(nn.Module):
             input_shape=(3, 224, 224),      # shapes
             proj_shape=(4096, 256),
             whiten='cholesky',              # whitening operator
-            w_iter=1,
-            w_fs=64,
+            w_iter=0,                       # 0: adaptive w_iter
+            w_fs=0,                         # 0: adaptive w_fs
+            queue_size=1024,
             eps=0,
             log=False,                      # log
             **kargs
@@ -61,6 +56,13 @@ class Model(nn.Module):
 
         self.reps = {}
 
+        # queue for whitening computation
+        # credit to MoCo code
+        self.queue_size = queue_size
+        self.queue_full = False
+        self.register_buffer("queue", torch.randn(queue_size, proj_shape[-1]))
+        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
+
     def forward(self, x1, x2):
         """
         loss = loss_consistency + loss_cross_model + loss_cross_term
@@ -89,6 +91,7 @@ class Model(nn.Module):
 
         return y_online, z_online
 
+
     def gen_loss(self, reps1, reps2):
         """
         Different ways of generating losses, overwrites it if needed.
@@ -96,38 +99,34 @@ class Model(nn.Module):
         :param reps2:
         :return:
         """
-        y_online1, z_online1 = reps1
-        y_online2, z_online2 = reps2
+        y_online1, z1 = reps1
+        y_online2, z2 = reps2
 
-        # perform whitening procedure.
-        bs, fs = z_online1.shape
-        loss = 0
+        # enqueue the new representation.
+        self._dequeue_and_enqueue(torch.cat([z1,z2], dim=0))
 
-        # Sliced Whitening,
-        # to prevent singular covariance matrix, w_fs < bs-1
-        w_fs = min(bs-1, fs, self.w_fs)
+        if not self.queue_full:
+            print(f"filling up the queue.")
+            return 0*torch.norm(z1) # not generating any loss.
 
-        for _ in range(self.w_iter):
-            perm = torch.randperm(fs)
-            z1, z2 = z_online1[:, perm][:, :w_fs], z_online2[:, perm][:, :w_fs]
-            # z1, z2 = z_online1, z_online2
+        # if singular then cut the dimension by the half of the rank.
+        q_rank = torch.matrix_rank(torch.mm(self.queue.T, self.queue))
+        if q_rank == self.queue.shape[1]:
+            w = _whiten(self.queue, eps=self.eps, whiten_method=self.whiten) # symmetric whitening matrix
+            w_z1, w_z2 = torch.mm(z1, w), torch.mm(z2, w)
+        else:
+            w_fs = int(q_rank // 2)
+            perm = torch.randperm(z1.shape[1])
+            z1, z2, q = z1[:, perm][:, :w_fs], z2[:, perm][:,:w_fs], self.queue[:,perm][:,:w_fs]
 
-            if bs <= z1.shape[1]:
-                warnings.warn('sliced feature size <= dimension, might cause singular covariance matrix.', RuntimeWarning)
-            try:
-                w_z1 = _whiten(z1, eps=self.eps, whiten_method=self.whiten)
-                w_z2 = _whiten(z2, eps=self.eps, whiten_method=self.whiten)
-            except:
-                print(f'bs={bs}, w_fs={w_fs}, causing singular matrix. matching to gaussian instead.')
-                w_z1 = torch.normal(0, 1, size=z1.shape).cuda()
-                w_z2 = torch.normal(0, 1, size=z2.shape).cuda()
+            w = _whiten(q, eps=self.eps, whiten_method=self.whiten)
+            w_z1, w_z2 = torch.mm(z1, w), torch.mm(z2, w)
 
-            loss += 0.5 * ((self.normalize(z1) - self.normalize(w_z2)).square().mean() +
-                           (self.normalize(z2) - self.normalize(w_z1)).square().mean())
-
-        loss /= self.w_iter
+        loss = 0.5 * ((self.normalize(z1) - self.normalize(w_z2)).square().mean() +
+                       (self.normalize(z2) - self.normalize(w_z1)).square().mean())
 
         return loss
+
 
     @torch.no_grad()
     def register_reps(self, reps, view):
@@ -146,6 +145,29 @@ class Model(nn.Module):
         self.reps[f'online.{view}'] = self.normalize(z_online)[:batch_size,:]
 
 
+    @torch.no_grad()
+    def _dequeue_and_enqueue(self, keys):
+        # gather keys before updating queue
+        keys = concat_all_gather(keys)
+
+        bs = keys.shape[0]
+
+        ptr = int(self.queue_ptr)
+        if ptr + bs >= self.queue_size:
+            self.queue_full = True
+        if self.queue_size % bs != 0:
+            print(self.queue_size, bs)
+        assert self.queue_size % bs == 0  # for simplicity
+
+        # replace the keys at ptr (dequeue and enqueue)
+        self.queue[ptr:ptr + bs, :] = keys
+        ptr = (ptr + bs) % self.queue_size  # move pointer
+
+        self.queue_ptr[0] = ptr
+
+#######################################
+# utils
+# whitening related
 @torch.no_grad()
 def _whiten(x, eps, whiten_method='cholesky'):
     """
@@ -168,13 +190,23 @@ def _whiten(x, eps, whiten_method='cholesky'):
     if whiten_method == 'cholesky':
         # cholesky is default
         L = torch.cholesky(x_cov)
-        W = torch.inverse(L).T
-        return torch.mm(x, W)
-    elif whiten_method == 'bn':
-        x_var = x.square().mean(dim=0)
-        return x / torch.sqrt(x_var + eps)
+        return torch.inverse(L).T
     else:
         raise NotImplementedError(f"{whiten_method} is not implemented yet.")
+
+
+@torch.no_grad()
+def concat_all_gather(tensor):
+    """
+    Performs all_gather operation on the provided tensors.
+    *** Warning ***: torch.distributed.all_gather has no gradient.
+    """
+    tensors_gather = [torch.ones_like(tensor)
+        for _ in range(torch.distributed.get_world_size())]
+    torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
+
+    output = torch.cat(tensors_gather, dim=0)
+    return output
 
 
 if __name__ == '__main__':
