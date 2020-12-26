@@ -4,9 +4,8 @@ import torch.nn as nn
 import torchvision
 from torchvision import transforms
 
-from dataset_apis import TransformsSimCLR
 
-def load_trainset():
+def load_trainset(trans):
     """
     Training set during SSL
     :return:
@@ -15,7 +14,7 @@ def load_trainset():
         root='./data/cifar100',
         train=True,
         download=False,
-        transform=TransformsSimCLR(32)
+        transform=trans(32)
     )
 
 def load_eval_trainset():

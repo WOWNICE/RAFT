@@ -4,9 +4,6 @@ import torch.nn as nn
 
 # mapping from the model name to the model constructor
 from models import *
-from models.main import RandomApply
-
-import scipy.spatial as spatial
 
 
 class Model(nn.Module):

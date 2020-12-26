@@ -2,24 +2,28 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from kornia import augmentation as augs
+from kornia import filters, color
 
 # mapping from the model name to the model constructor
+from models import name_model_dic as func_dic
+from models.main import RandomApply
+
+import scipy.spatial as spatial
 
 from models.main.byol import Model as Byol
-
-from models import *
 
 
 class Model(Byol):
     """
-    RAFT model.
+    RAFT model. only the alignment loss is computed right after the projector but not predictor.
     """
     def __init__(
             self,
             # models
-            encoder='resnet50',
-            projector='2layermlpbn',
-            predictor='2layermlpbn',
+            encoder='resnet18',
+            projector='byol-proj',
+            predictor='byol-proj',
             normalization='l2',
             # shapes
             input_shape=(3, 224, 224),
@@ -60,13 +64,20 @@ class Model(Byol):
         # normalize them
         z_online_pred1 = self.normalize(z_online_pred1)
         z_online_pred2 = self.normalize(z_online_pred2)
+        # z_online1 = self.normalize(z_online1)
+        # z_online2 = self.normalize(z_online2)
         z_target1 = self.normalize(z_target1)
         z_target2 = self.normalize(z_target2)
 
+        # use cross-model loss to constrain the predictor only.
+        z_predonly1 = self.normalize(self.pred(z_online1.detach()))
+        z_predonly2 = self.normalize(self.pred(z_online2.detach()))
+
         # compute the loss
         loss_align = (z_online_pred1 - z_online_pred2).square().mean()
+        loss_cross_predonly = ((z_predonly1 - z_target1).square().mean() + (z_predonly2 - z_target2).square().mean()) / 2
         loss_cross = ((z_online_pred1 - z_target1).square().mean() + (z_online_pred2 - z_target2).square().mean()) / 2
-        loss = self.alignment_weight * loss_align - self.cross_weight * loss_cross
+        loss = self.alignment_weight * loss_align - self.cross_weight * (loss_cross - loss_cross_predonly)
 
         return loss
 

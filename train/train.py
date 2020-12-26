@@ -41,7 +41,8 @@ def train(gpu, args):
 
     torch.cuda.set_device(gpu)
 
-    trainset = load_trainset()
+    trans = AUGS[args.aug]
+    trainset = load_trainset(trans)
 
     # trainset = DistributedIndicesWrapper(trainset, list(range(5000)))
 
@@ -199,6 +200,8 @@ if __name__ == '__main__':
                         help='which model to be trained on.')
 
     # architecture inside the model
+    parser.add_argument('--aug', default='mocov2', type=str, metavar='N',
+                        help='augmentation.')
     parser.add_argument('--encoder', default='resnet18', type=str, metavar='N',
                         help='encoder.')
     parser.add_argument('--projector', default='2layermlpbn', type=str, metavar='N',

@@ -4,16 +4,14 @@ import torch.nn as nn
 import torchvision
 from torchvision import transforms
 
-from dataset_apis import TransformsSimCLR
-
-def load_trainset():
+def load_trainset(trans):
     """
     Training set during SSL
     :return:
     """
     return torchvision.datasets.ImageFolder(
         './data/imagenet/train',
-        transform=TransformsSimCLR(224)
+        transform=trans(224)
         )
 
 

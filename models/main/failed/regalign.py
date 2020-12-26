@@ -2,24 +2,28 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from kornia import augmentation as augs
+from kornia import filters, color
 
 # mapping from the model name to the model constructor
+from models import name_model_dic as func_dic
+from models.main import RandomApply
+
+import scipy.spatial as spatial
 
 from models.main.byol import Model as Byol
-
-from models import *
-
+from models.submodels.mlps import *
 
 class Model(Byol):
     """
-    RAFT model.
+    RAFT model. only the alignment loss is computed right after the projector but not predictor.
     """
     def __init__(
             self,
             # models
-            encoder='resnet50',
-            projector='2layermlpbn',
-            predictor='2layermlpbn',
+            encoder='resnet18',
+            projector='byol-proj',
+            predictor='byol-proj',
             normalization='l2',
             # shapes
             input_shape=(3, 224, 224),
@@ -29,6 +33,8 @@ class Model(Byol):
             alignment_weight=1.,
             cross_weight=1.,
             same_init=False,
+            p_norm=2.,
+            reg_weight=1.,
             **kwargs
     ):
         super(Model, self).__init__(
@@ -47,6 +53,9 @@ class Model(Byol):
         self.alignment_weight = alignment_weight
         self.cross_weight = cross_weight
 
+        self.p_norm = p_norm
+        self.reg_weight = reg_weight
+
     def gen_loss(self, reps1, reps2):
         """
         Different ways of generating losses, overwrites it if needed.
@@ -60,15 +69,17 @@ class Model(Byol):
         # normalize them
         z_online_pred1 = self.normalize(z_online_pred1)
         z_online_pred2 = self.normalize(z_online_pred2)
-        z_target1 = self.normalize(z_target1)
-        z_target2 = self.normalize(z_target2)
+        # z_target1 = self.normalize(z_target1)
+        # z_target2 = self.normalize(z_target2)
 
         # compute the loss
         loss_align = (z_online_pred1 - z_online_pred2).square().mean()
-        loss_cross = ((z_online_pred1 - z_target1).square().mean() + (z_online_pred2 - z_target2).square().mean()) / 2
-        loss = self.alignment_weight * loss_align - self.cross_weight * loss_cross
+        assert(isinstance(self.pred, ProjectorLinearNoBN))
+        # restrain predictor = I
+        loss_reg = torch.norm(self.pred.main.weight - torch.eye(z_online_pred1.shape[1]).cuda(), p=self.p_norm) \
+                   + torch.norm(self.pred.main.bias, p=self.p_norm)
 
-        return loss
+        return loss_align + self.reg_weight * loss_reg
 
 
 if __name__ == '__main__':
