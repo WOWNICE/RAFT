@@ -46,13 +46,7 @@ def eval_knn(model, args):
         pin_memory=True,
     )
 
-    # multi-processing with gpus
-    # pool = Pool()
-    # func_args = [(gpu, model, train_loader, test_loader, args.k)
-    #     for (gpu, train_loader) in enumerate(train_loaders)
-    # ]
-    # print(func_args)
-    # lst = pool.starmap(load_tensor_single, func_args)
+    # queue
     queue, exit_queue = Queue(), Queue()
     processes = [
         Process(target=load_tensor_single,
@@ -111,36 +105,40 @@ def load_tensor_single(gpu, model, train_loader, test_loader, k, queue, exit_que
     del xs, ys
 
     # training features
-    ds, ys = [], []
+    # instead of storing all the features, we maintain a priority queue.
+    ds, ys = None, None
     for step, (images, labels) in enumerate(train_loader):
         images, labels = images.cuda(non_blocking=True), labels.cuda(non_blocking=True)
 
         reps = model(images)
 
-        ds.append(torch.cdist(test_x, reps))
-        ys.append(labels)
+        # concat and order
+        ds = torch.cdist(test_x, reps) if ds is None else torch.cat([ds, torch.cdist(test_x, reps)], dim=1)
+        ys = labels.expand(size=[test_x.shape[0], labels.shape[-1]]) if ys is None else torch.cat([ys, labels.expand(size=[test_x.shape[0], labels.shape[-1]])], dim=1)
 
-    d, train_y = torch.cat(ds, dim=1), torch.cat(ys)
-    del ds, ys
+        # compute local knn to save memory cost
+        topk = torch.topk(ds, k=k, dim=1, largest=False)
+        ds = topk.values
+        new_ys = torch.zeros_like(topk.indices)
 
-    # compute local knn
-    topk = torch.topk(d, k=k, dim=1, largest=False)
-    labels = train_y[topk.indices]
-    distances = topk.values
+        # TODO: can be further optimized？
+        for i in range(ys.shape[0]):
+            new_ys[i, :] = ys[i][topk.indices[i]]
+        ys = new_ys
 
     # put to the queue, test_y is global
-    # there is some issue with queue.get(torch.Tensor)
-    queue.put((gpu, labels.cpu(), distances.cpu(), test_y.cpu()))
+    queue.put((gpu, ys.cpu(), ds.cpu(), test_y.cpu()))
 
     # manual synchronization
+    # there is some issue with queue.get(torch.Tensor) if no synchronization measure is taken.
     while True:
         allow_exit = exit_queue.get()
         if allow_exit != gpu:
-            print(f'proc.{gpu} get key.{allow_exit}, put it back.')
+            # print(f'proc.{gpu} get key.{allow_exit}, put it back.')
             exit_queue.put(allow_exit)
             time.sleep(1)
         else:
-            print(f'proc.{gpu} get key.{allow_exit}, exiting.')
+            # print(f'proc.{gpu} get key.{allow_exit}, exiting.')
             break
 
     return
