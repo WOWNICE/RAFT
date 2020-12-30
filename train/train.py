@@ -103,9 +103,9 @@ def train(gpu, args):
 
     # online optimizer
     if args.optimizer == 'sgd':
-        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     elif args.optimizer == 'adam':
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     # amp apex training for the main model
     try:
@@ -265,7 +265,8 @@ if __name__ == '__main__':
                         help='which checkpoint to reload.')
     parser.add_argument('--reload-epoch', default=0, type=int, metavar='N',
                         help='epoch trained on the reloaded checkpoint.')
-
+    parser.add_argument('--weight-decay', default=0., type=float, metavar='N',
+                        help='weight decay on the optimizer')
     parser.add_argument('--same-init', default='False', type=str, metavar='N',
                         help='whether starts from the same initialization')
 
