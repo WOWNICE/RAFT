@@ -71,6 +71,32 @@ class EmaWrapper(EmptyWrapper):
         elif self.opt == 'fix':
             pass
 
+@WRAPPERS.register_module('emacosine')
+class EmaCosineWrapper(EmaWrapper):
+    def __init__(self, model, opt='sgd', lr=4e-3, momentum=0.9, K=200, **kwargs):
+        super(EmaCosineWrapper, self).__init__(
+            model=model,
+            opt=opt,
+            lr=lr,
+            momentum=momentum
+        )
+        self.K = K
+        self.k = 0
+        self.lr =lr
+
+    def update(self):
+        super(EmaCosineWrapper, self).update()
+
+        # update the epoch number k
+        self.k += 1
+
+        # compute new lr
+        new_lr = self.lr * (np.cos(np.pi*self.k/self.K)+1)/2    # equivalent form of the original BYOL paper.
+
+        # update the optimizer learning
+        for g in self.optimizer.param_groups:
+            g['lr'] = new_lr
+
 
 @WRAPPERS.register_module('freezepred')
 class FreezePredWrapper(EmaWrapper):

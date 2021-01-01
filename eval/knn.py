@@ -7,23 +7,9 @@ import importlib
 import time
 from .utils import *
 
-def knn(x_train, y_train, x_test, y_test, k=5,):
-    """ k-nearest neighbors classifier accuracy """
-
-    d = torch.cdist(x_test, x_train)
-    topk = torch.topk(d, k=k, dim=1, largest=False)
-    labels = y_train[topk.indices]
-    pred = torch.empty_like(y_test)
-    for i in range(len(labels)):
-        x = labels[i].unique(return_counts=True)
-        pred[i] = x[0][x[1].argmax()]
-
-    acc = (pred == y_test).float().mean().cpu().item()
-    del d, topk, labels, pred
-    return acc
-
 
 def eval_knn(model, args):
+    start_time = time.time()
     # prep
     load_trainset = getattr(importlib.import_module(f'dataset_apis.{args.dataset}'), 'load_eval_trainset')
     trainset = load_trainset()
@@ -84,7 +70,7 @@ def eval_knn(model, args):
 
     acc = (pred == test_y).float().mean().item()
     print(f"[TEST]\t[KNN-ACC={acc*100.:3.2f}%]")
-
+    print(f"[TIME]\t[KNN-EVAL-TIME={time.time()-start_time:.2f}]s")
 
 @torch.no_grad()
 def load_tensor_single(gpu, model, train_loader, test_loader, k, queue, exit_queue):

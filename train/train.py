@@ -17,13 +17,20 @@ import torchvision.transforms as transforms
 
 from torch.utils.data.sampler import SubsetRandomSampler
 
-from collections import defaultdict
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+from utils.optim import LARS, collect_params, update_lr
 
 # supervision of training
 from torch.utils.tensorboard import SummaryWriter
 
 
 from models import * #import all the registries
+
+total_samples_dict = {
+    'imagenet':     1281167,
+    'cifar10':      50000,
+    'subimagenet':  126689
+}
 
 
 def cleanup():
@@ -40,6 +47,14 @@ def train(gpu, args):
     torch.manual_seed(args.rand_seed)
 
     torch.cuda.set_device(gpu)
+
+    # compute batch size / global batch size and other helpful information
+    global_bs = args.batch_size * args.gpus
+    base_lr = args.lr / 256 # empirical setting
+    max_lr = base_lr * global_bs
+
+    total_steps = args.epochs * total_samples_dict[args.dataset] // global_bs
+    warmup_steps = args.warmup_epochs * total_samples_dict[args.dataset] // global_bs
 
     trans = AUGS[args.aug]
     trainset = load_trainset(trans)
@@ -87,7 +102,11 @@ def train(gpu, args):
         whiten=args.whiten,
         w_iter=args.w_iter,
         w_fs=args.w_fs,
-        queue_size=args.q_size
+        queue_size=args.q_size,
+
+        # bgm arguments
+        prior=args.prior,
+        solver=args.solver
     )
 
     # reload the checkpoint
@@ -106,6 +125,9 @@ def train(gpu, args):
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     elif args.optimizer == 'adam':
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    elif args.optimizer == 'lars':
+        params = collect_params([model], exclude_bias_and_bn=True) # default is true.
+        optimizer = LARS(params, base_lr, weight_decay=args.weight_decay)
 
     # amp apex training for the main model
     try:
@@ -117,7 +139,7 @@ def train(gpu, args):
 
     # ema wrapper should go after the amp wrapper
     WeightWrapper = WRAPPERS[args.weight_wrapper]
-    model = WeightWrapper(model, opt=args.ema_mode, lr=args.ema_lr, momentum=1, pred_path=args.pred_checkpoint)
+    model = WeightWrapper(model, opt=args.ema_mode, lr=args.ema_lr, momentum=1, pred_path=args.pred_checkpoint, K=total_steps)
     # _, model.optimizer = amp.initialize([model.model.target, model.model.target_proj], model.optimizer, opt_level="O1")
 
     # a series of logger wrappers
@@ -142,13 +164,11 @@ def train(gpu, args):
             # each round is formed of 100 epoch
             x1, x2 = x1.cuda(non_blocking=True), x2.cuda(non_blocking=True)
 
+            loss = model(x1, x2)
 
-            for k in range(args.k):
-                loss = model(x1, x2)
-
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
             # update the target network.
             model.module.update()
@@ -156,6 +176,9 @@ def train(gpu, args):
             if gpu == 0 and args.log == 'True':
                 model.module.estimate()
 
+            # scheduler
+            if args.optimizer == 'lars':
+                update_lr(max_lr=max_lr, warmup_steps=warmup_steps, total_steps=total_steps, step=global_step, optimizer=optimizer)
             global_step += 1
 
         if gpu == 0:
@@ -241,6 +264,8 @@ if __name__ == '__main__':
                         help='number of data loader workers per process')
     parser.add_argument('--epochs', default=300, type=int, metavar='N',
                         help='number of total epochs to run')
+    parser.add_argument('--warmup-epochs', default=10, type=int, metavar='N',
+                        help='warmup-epochs if annealing is used.')
     parser.add_argument('--batch-size', default=32, type=int, metavar='N',
                         help='batch size per node')
     parser.add_argument('--rand-seed', default=2333, type=int, metavar='N',
@@ -249,14 +274,12 @@ if __name__ == '__main__':
                         help='resize the image dimension')
     parser.add_argument('--optimizer', default='adam', type=str, metavar='N',
                         help='which optimizer to optimize the online network')
-    parser.add_argument('--lr', default=3e-4, type=float, metavar='N',
-                        help='learning rate')
+    parser.add_argument('--lr', default=0.2, type=float, metavar='N',
+                        help='base learning rate if using LARS optimizer; real learning rate if using other learning rate.')
     parser.add_argument('--ema-lr', default=3e-4, type=float, metavar='N',
                         help='ema learning rate')
     parser.add_argument('--ema-mode', default='sgd', type=str, metavar='N',
                         help='how to update the target')
-    parser.add_argument('--k', default=1, type=int, metavar='N',
-                        help='updates per bootstrap')
     parser.add_argument('--checkpoint-epochs', default=10, type=int, metavar='N',
                         help='checkpoint online model per epoch')
     parser.add_argument('--checkpoint-dir', default='checkpoints', type=str, metavar='N',
@@ -269,6 +292,8 @@ if __name__ == '__main__':
                         help='weight decay on the optimizer')
     parser.add_argument('--same-init', default='False', type=str, metavar='N',
                         help='whether starts from the same initialization')
+    parser.add_argument('--cosineanneal', default='False', type=str, metavar='N',
+                        help='the learning rate scheduler. default CosineAnealing in BYOL.')
 
     # RAFT specific setting
     parser.add_argument('--cross-weight', default=1., type=float, metavar='N',
@@ -300,6 +325,11 @@ if __name__ == '__main__':
     parser.add_argument('--q-size', default=2048, type=int, metavar='N',
                         help='sliced feature size of the representations')
 
+    # setting for the bgm model
+    parser.add_argument('--prior', default='gaussian', type=str, metavar='N',
+                        help='the prior distribution to match for collapse prevention.')
+    parser.add_argument('--solver', default='dense', type=str, metavar='N',
+                        help='the assignment problem solver.')
 
     args = parser.parse_args()
     # print(args)
