@@ -97,7 +97,7 @@ class Model(nn.Module):
         z_target2 = self.normalize(z_target2)
 
         # compute the loss
-        loss = ((z_online_pred1 - z_target2).square().mean() + (z_online_pred2 - z_target1).square().mean()) / 2
+        loss = ((z_online_pred1 - z_target2).square().sum(dim=1).mean() + (z_online_pred2 - z_target1).square().sum(dim=1).mean()) / 2
 
         return loss
 

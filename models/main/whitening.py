@@ -122,8 +122,8 @@ class Model(nn.Module):
             w = _whiten(q, eps=self.eps, whiten_method=self.whiten)
             w_z1, w_z2 = torch.mm(z1, w), torch.mm(z2, w)
 
-        loss = 0.5 * ((self.normalize(z1) - self.normalize(w_z2)).square().mean() +
-                       (self.normalize(z2) - self.normalize(w_z1)).square().mean())
+        loss = 0.5 * ((self.normalize(z1) - self.normalize(w_z2)).square().sum(dim=1).mean() +
+                       (self.normalize(z2) - self.normalize(w_z1)).square().sum(dim=1).mean())
 
         return loss
 

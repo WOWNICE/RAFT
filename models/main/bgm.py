@@ -96,8 +96,8 @@ class Model(nn.Module):
         z1, z2 = z1 - z1.mean(dim=0, keepdims=True), z2 - z2.mean(dim=0, keepdims=True)
         target1, target2 = self.match_prior(z1, sample1, solver=self.solver), self.match_prior(z2, sample2, solver=self.solver)
 
-        loss = 0.5 * ((self.normalize(z1) - self.normalize(target2)).square().mean() +
-                       (self.normalize(z2) - self.normalize(target1)).square().mean())
+        loss = 0.5 * ((self.normalize(z1) - self.normalize(target2)).square().sum(dim=1).mean() +
+                       (self.normalize(z2) - self.normalize(target1)).square().sum(dim=1).mean())
 
         return loss
 
