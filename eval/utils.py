@@ -27,7 +27,7 @@ def correct_k(output, target, topk=(1,)):
         return res
 
 
-def load_model(model_checkpoint, encoder='resnet50', online=True, projector='', predictor=''):
+def load_model(model_checkpoint, encoder='resnet50', mode='online', projector='', predictor=''):
     # load the evaluate
     dic = torch.load(model_checkpoint, map_location=torch.device('cpu'))
 
@@ -42,10 +42,14 @@ def load_model(model_checkpoint, encoder='resnet50', online=True, projector='', 
             target_param[k[7:]] = v
 
     encoder = ENCODERS[encoder]()
-    if online:
+    if mode == 'online':
         encoder.load_state_dict(online_param)
-    else:
+    elif mode == 'target':
         encoder.load_state_dict(target_param)
+    elif mode == 'whole':
+        encoder.load_state_dict(dic)
+    else:
+        raise NotImplementedError(f"eval mode '{mode}' is not supported. ")
 
     components = [encoder]
     # TODO: support evaluation on projector & predictor

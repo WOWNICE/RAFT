@@ -15,19 +15,22 @@ def load_trainset(trans):
         )
 
 
-def load_eval_trainset():
+def load_eval_trainset(trans=None):
     """
     Training set during Linear Evaluation Protocol
     :return:
     """
+    if not trans:
+        trans = transforms.Compose([
+            transforms.RandomResizedCrop(size=224),
+            transforms.RandomHorizontalFlip(),  # with 0.5 probability
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+
     return torchvision.datasets.ImageFolder(
         root='./data/imagenet/train',
-        transform=torchvision.transforms.Compose([
-                torchvision.transforms.RandomResizedCrop(size=224),
-                torchvision.transforms.RandomHorizontalFlip(),  # with 0.5 probability
-                torchvision.transforms.ToTensor(),
-                torchvision.transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-            ])
+        transform=trans
     )
 
 def load_testset():

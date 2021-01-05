@@ -17,7 +17,7 @@ def load_trainset(trans):
         transform=trans(32)
     )
 
-def load_eval_trainset():
+def load_eval_trainset(**kwargs):
     """
     Training set during Linear Evaluation Protocol
     :return:

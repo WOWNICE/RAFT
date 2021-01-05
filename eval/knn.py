@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from torchvision import transforms
 import argparse
 from torch.multiprocessing import Process, Queue
 import importlib
@@ -12,7 +13,13 @@ def eval_knn(model, args):
     start_time = time.time()
     # prep
     load_trainset = getattr(importlib.import_module(f'dataset_apis.{args.dataset}'), 'load_eval_trainset')
-    trainset = load_trainset()
+    trans = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    ])
+    trainset = load_trainset(trans=trans)
     inds = np.array_split(range(len(trainset)), args.gpus)
     train_loaders = [torch.utils.data.DataLoader(
         torch.utils.data.Subset(trainset, ind),
@@ -172,7 +179,7 @@ if __name__ == '__main__':
         model = load_model(
             model_checkpoint=args.checkpoint,
             encoder=args.encoder,
-            online=args.eval_mode == 'online',
+            mode=args.eval_mode,
             projector=args.projector,
             predictor=args.predictor
         )

@@ -203,7 +203,7 @@ if __name__ == '__main__':
         model = load_model(
             model_checkpoint=args.checkpoint,
             encoder=args.encoder,
-            online=args.eval_mode == 'online',
+            mode=args.eval_mode,
             projector=args.projector,
             predictor=args.predictor
         )

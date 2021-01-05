@@ -122,12 +122,12 @@ def train(gpu, args):
 
     # online optimizer
     if args.optimizer == 'sgd':
-        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=args.momentum)
     elif args.optimizer == 'adam':
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     elif args.optimizer == 'lars':
         params = collect_params([model], exclude_bias_and_bn=True) # default is true.
-        optimizer = LARS(params, base_lr, weight_decay=args.weight_decay)
+        optimizer = LARS(params, base_lr, weight_decay=args.weight_decay, momentum=args.momentum)
 
     # amp apex training for the main model
     try:
@@ -276,6 +276,8 @@ if __name__ == '__main__':
                         help='which optimizer to optimize the online network')
     parser.add_argument('--lr', default=0.2, type=float, metavar='N',
                         help='base learning rate if using LARS optimizer; real learning rate if using other learning rate.')
+    parser.add_argument('--momentum', default=0.9, type=float, metavar='N',
+                        help='momentum of the sgd and lars optimizer')
     parser.add_argument('--ema-lr', default=3e-4, type=float, metavar='N',
                         help='ema learning rate')
     parser.add_argument('--ema-mode', default='sgd', type=str, metavar='N',
