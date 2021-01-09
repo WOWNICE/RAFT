@@ -126,7 +126,7 @@ def train(gpu, args):
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     elif args.optimizer == 'lars':
         params = collect_params([model], exclude_bias_and_bn=True) # default is true.
-        optimizer = LARS(params, base_lr, weight_decay=args.weight_decay, momentum=args.momentum)
+        optimizer = LARS(params, max_lr, weight_decay=args.weight_decay, momentum=args.momentum)
 
     # amp apex training for the main model
     try:
