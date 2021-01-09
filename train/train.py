@@ -17,7 +17,6 @@ import torchvision.transforms as transforms
 
 from torch.utils.data.sampler import SubsetRandomSampler
 
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from utils.optim import LARS, collect_params, update_lr
 
 # supervision of training
@@ -137,6 +136,10 @@ def train(gpu, args):
     if args.amp == 'True':
         model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 
+    # lr_scheduler, wrapping over the optimizer
+    c_step = args.reload_epoch*total_samples_dict[args.dataset]
+    optimizer = WRAPPERS[args.lr_wrapper](optimizer, total_steps=total_steps, warmup_steps=warmup_steps, c_step=c_step)
+
     # ema wrapper should go after the amp wrapper
     WeightWrapper = WRAPPERS[args.weight_wrapper]
     model = WeightWrapper(model, opt=args.ema_mode, lr=args.ema_lr, momentum=1, pred_path=args.pred_checkpoint, K=total_steps)
@@ -177,8 +180,8 @@ def train(gpu, args):
                 model.module.estimate()
 
             # scheduler
-            if args.optimizer == 'lars':
-                update_lr(max_lr=max_lr, warmup_steps=warmup_steps, total_steps=total_steps, step=global_step, optimizer=optimizer)
+            # if args.optimizer == 'lars':
+            #     update_lr(max_lr=max_lr, warmup_steps=warmup_steps, total_steps=total_steps, step=global_step, optimizer=optimizer)
             global_step += 1
 
         if gpu == 0:
@@ -241,6 +244,8 @@ if __name__ == '__main__':
                         help='registered in models.WRAPPERS')
     parser.add_argument('--logger-wrappers', default='emptylogger', type=str, metavar='N',
                         help="a list of loggers, separated by '.'")
+    parser.add_argument('--lr-wrapper', default='lr.empty', type=str, metavar='N',
+                        help='the learning rate scheduler. default CosineAnealing in BYOL.')
 
 
     # sub-process info
@@ -294,8 +299,7 @@ if __name__ == '__main__':
                         help='weight decay on the optimizer')
     parser.add_argument('--same-init', default='False', type=str, metavar='N',
                         help='whether starts from the same initialization')
-    parser.add_argument('--cosineanneal', default='False', type=str, metavar='N',
-                        help='the learning rate scheduler. default CosineAnealing in BYOL.')
+
 
     # RAFT specific setting
     parser.add_argument('--cross-weight', default=1., type=float, metavar='N',

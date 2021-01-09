@@ -21,3 +21,4 @@ from .submodels.mlps import *
 from .submodels.augmentations import *
 from .wrappers.weight_wrapper import *
 from .wrappers.logger_wrapper import *
+from .wrappers.lr_wrapper import *
