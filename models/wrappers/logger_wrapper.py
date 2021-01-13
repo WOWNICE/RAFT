@@ -69,7 +69,6 @@ class AlignLogger(EmptyLogger):
                 self.metrics[f'align.{key}'].append(_lalign(lst[0], lst[1]))
         except IndexError:
             warnings.warn('index out of range, disable estimation.', RuntimeWarning)
-            self.estimate = _empty_func
 
 
 @WRAPPERS.register_module('uniformlogger')
@@ -100,7 +99,23 @@ class UniformLogger(EmptyLogger):
                 self.metrics[f'uniform.{key}'].append(uniform)
         except IndexError:
             warnings.warn('index out of range, disable estimation.', RuntimeWarning)
-            self.estimate = _empty_func
+
+
+@WRAPPERS.register_module('prednormlogger')
+class PredNormLogger(EmptyLogger):
+    def __init__(self, model, **kwargs):
+        super(PredNormLogger, self).__init__(model=model)
+
+    @torch.no_grad()
+    def estimate(self):
+        # only estimate the online networks' uniformity
+        super(PredNormLogger, self).estimate()
+
+        try:
+            for name, param in self.module.pred.named_parameters():
+                self.metrics[f'norm.pred.{name}'].append(torch.norm(param).detach().item())
+        except :
+            warnings.warn('model doesnt have pred property.')
 
 
 

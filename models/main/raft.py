@@ -64,8 +64,9 @@ class Model(Byol):
         z_target2 = self.normalize(z_target2)
 
         # compute the loss
-        loss_align = (z_online_pred1 - z_online_pred2).square().mean()
-        loss_cross = ((z_online_pred1 - z_target1).square().sum(dim=1).mean() + (z_online_pred2 - z_target2).square().sum(dim=1).mean()) / 2
+        bs = z_online_pred1.shape[0]
+        loss_align = 2 - 2 * (z_online_pred1 * z_online_pred2).sum() / bs
+        loss_cross = 2 - (z_online_pred1 * z_target1 + z_online_pred2 * z_target2).sum() / bs
         loss = self.alignment_weight * loss_align - self.cross_weight * loss_cross
 
         return loss

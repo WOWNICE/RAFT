@@ -55,6 +55,10 @@ def train(gpu, args):
     total_steps = args.epochs * total_samples_dict[args.dataset] // global_bs
     warmup_steps = args.warmup_epochs * total_samples_dict[args.dataset] // global_bs
 
+    # convert it to the
+    ladder_steps = [x * total_samples_dict[args.dataset] // global_bs for x in [float(x) for x in args.ladder_epochs.split(':')]] if args.ladder_epochs else None
+    ladder_scalers = [float(x) for x in args.ladder_scalers.split(':')] if args.ladder_scalers else None
+
     trans = AUGS[args.aug]
     trainset = load_trainset(trans)
 
@@ -70,7 +74,7 @@ def train(gpu, args):
     train_loader = torch.utils.data.DataLoader(
         trainset,
         batch_size=args.batch_size,
-        shuffle=False,
+        shuffle=True,
         num_workers=args.num_workers,
         pin_memory=True,
         sampler=train_sampler,
@@ -138,11 +142,11 @@ def train(gpu, args):
 
     # lr_scheduler, wrapping over the optimizer
     c_step = args.reload_epoch*total_samples_dict[args.dataset]
-    optimizer = WRAPPERS[args.lr_wrapper](optimizer, total_steps=total_steps, warmup_steps=warmup_steps, c_step=c_step)
+    optimizer = WRAPPERS[args.lr_wrapper](optimizer, total_steps=total_steps, warmup_steps=warmup_steps, c_step=c_step, ladder_steps=ladder_steps, ladder_scalers=ladder_scalers)
 
     # ema wrapper should go after the amp wrapper
     WeightWrapper = WRAPPERS[args.weight_wrapper]
-    model = WeightWrapper(model, opt=args.ema_mode, lr=args.ema_lr, momentum=1, pred_path=args.pred_checkpoint, K=total_steps)
+    model = WeightWrapper(model, opt=args.ema_mode, lr=args.ema_lr, momentum=1, pred_path=args.pred_checkpoint, K=total_steps, k=c_step)
     # _, model.optimizer = amp.initialize([model.model.target, model.model.target_proj], model.optimizer, opt_level="O1")
 
     # a series of logger wrappers
@@ -171,7 +175,7 @@ def train(gpu, args):
 
             optimizer.zero_grad()
             loss.backward()
-            optimizer.step()
+            optimizer.step() # already with the lr_scheduler
 
             # update the target network.
             model.module.update()
@@ -179,9 +183,6 @@ def train(gpu, args):
             if gpu == 0 and args.log == 'True':
                 model.module.estimate()
 
-            # scheduler
-            # if args.optimizer == 'lars':
-            #     update_lr(max_lr=max_lr, warmup_steps=warmup_steps, total_steps=total_steps, step=global_step, optimizer=optimizer)
             global_step += 1
 
         if gpu == 0:
@@ -271,6 +272,10 @@ if __name__ == '__main__':
                         help='number of total epochs to run')
     parser.add_argument('--warmup-epochs', default=10, type=int, metavar='N',
                         help='warmup-epochs if annealing is used.')
+    parser.add_argument('--ladder-epochs', default=None, type=str, metavar='N',
+                        help='a list of epoch numbers for ladder lr scheduler')
+    parser.add_argument('--ladder-scalers', default=None, type=str, metavar='N',
+                        help='a list of scalers for ladder lr scheduler.')
     parser.add_argument('--batch-size', default=32, type=int, metavar='N',
                         help='batch size per node')
     parser.add_argument('--rand-seed', default=2333, type=int, metavar='N',

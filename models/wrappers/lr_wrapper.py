@@ -65,7 +65,7 @@ class BaseWarmupAnnealing(BaseLRWrapper):
         self.update_lr()
         self.c_step += 1
 
-    def update_lr(self):
+    def compute_lr(self):
         if self.c_step < self.warmup_steps:
             lr = self.warmup(
                 step=self.c_step,
@@ -80,12 +80,60 @@ class BaseWarmupAnnealing(BaseLRWrapper):
                 min_lr=self.min_lr,
                 total_steps=self.total_steps-self.warmup_steps
             )
+        return lr
 
+    def update_lr(self):
+        lr = self.compute_lr()
         # update the learning rate in optimizer.
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
-        print(lr)
+
+
+class BaseWarmupAnnealingLadder(BaseWarmupAnnealing):
+    def __init__(
+            self,
+            optimizer,
+            steps_per_epoch=None,
+            total_steps=None, total_epochs=None,
+            warmup_steps=None, warmup_epochs=None,
+            ladder_steps=None,
+            ladder_scalers=None,
+            warm_anneal=(None, None),
+            baselr=None,
+            c_step=None,
+    ):
+        super(BaseWarmupAnnealingLadder, self).__init__(
+            optimizer=optimizer,
+            total_steps=total_steps,
+            total_epochs=total_epochs,
+            steps_per_epoch=steps_per_epoch,
+            warmup_steps=warmup_steps,
+            warmup_epochs=warmup_epochs,
+            warm_anneal=warm_anneal,
+            baselr=baselr,
+            c_step=c_step
+        )
+
+        self.ladder_steps = ladder_steps
+        self.ladder_scalers = ladder_scalers
+
+        print(ladder_steps, ladder_scalers)
+
+    def update_lr(self):
+        lr = self.compute_lr()
+
+        if self.ladder_steps and self.ladder_scalers:
+            assert(len(self.ladder_scalers) == len(self.ladder_steps))
+
+            for i, step in enumerate(self.ladder_steps):
+                if step < self.c_step:
+                    lr *= self.ladder_scalers[i]
+                else:
+                    break
+        # update the learning rate in optimizer.
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = lr
 
 
 # define several warmup functions and anneal functions
@@ -100,4 +148,6 @@ def anneal_cosine(step, max_lr, min_lr, total_steps):
 def linearcosine(*args, **kwargs):
     return BaseWarmupAnnealing(*args, warm_anneal=(warmup_linear, anneal_cosine), **kwargs)
 
-
+@WRAPPERS.register_module('lr.linearcosineladder')
+def linearcosine(*args, **kwargs):
+    return BaseWarmupAnnealingLadder(*args, warm_anneal=(warmup_linear, anneal_cosine), **kwargs)

@@ -16,15 +16,6 @@ class EmptyWrapper(BaseWrapper):
         self.update()
         return loss
 
-    def estimate_align(self):
-        return self.module.estimate_align()
-
-    def estimate_uniform(self):
-        return self.module.estimate_uniform()
-
-    def estimate_cross(self):
-        return self.module.estimate_cross()
-
     def update(self):
         pass
 
@@ -73,7 +64,7 @@ class EmaWrapper(EmptyWrapper):
 
 @WRAPPERS.register_module('emacosine')
 class EmaCosineWrapper(EmaWrapper):
-    def __init__(self, model, opt='sgd', lr=4e-3, momentum=0.9, K=200, **kwargs):
+    def __init__(self, model, opt='sgd', lr=4e-3, momentum=0.9, K=200, k=0, **kwargs):
         super(EmaCosineWrapper, self).__init__(
             model=model,
             opt=opt,
@@ -81,7 +72,7 @@ class EmaCosineWrapper(EmaWrapper):
             momentum=momentum
         )
         self.K = K
-        self.k = 0
+        self.k = k
         self.lr =lr
 
     def update(self):
