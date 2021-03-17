@@ -14,6 +14,7 @@ AUGS = Registry('augmentations')
 
 FUNCS.register_module('l2')(F.normalize)
 FUNCS.register_module('I')(nn.Identity())
+HEADS.register_module('I')(nn.Identity)
 
 # whenever creating a new module, register it here.
 from .submodels.resnets import *

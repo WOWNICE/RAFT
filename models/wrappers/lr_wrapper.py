@@ -39,7 +39,8 @@ class BaseWarmupAnnealing(BaseLRWrapper):
             warmup_steps=None, warmup_epochs=None,
             warm_anneal=(None, None),
             baselr=None,
-            c_step=None
+            c_step=None,
+            **kwargs
     ):
         super(BaseWarmupAnnealing, self).__init__(optimizer, baselr)
 
@@ -102,6 +103,7 @@ class BaseWarmupAnnealingLadder(BaseWarmupAnnealing):
             warm_anneal=(None, None),
             baselr=None,
             c_step=None,
+            **kwargs
     ):
         super(BaseWarmupAnnealingLadder, self).__init__(
             optimizer=optimizer,

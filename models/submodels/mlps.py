@@ -64,3 +64,24 @@ class ProjectorByol(nn.Module):
 
     def forward(self, x):
         return self.main(x)
+
+@HEADS.register_module('2layermlpfullbn')
+class ProjectorBNlast(nn.Module):
+    """
+    BN layer is used to guarantee the zero-mean of the encoder to avoid collapse.
+    """
+    def __init__(self, shape=()):
+        super(ProjectorBNlast, self).__init__()
+        if len(shape) < 3:
+            raise Exception("Wrong shape for Projector")
+
+        self.main = nn.Sequential(
+            nn.Linear(shape[0], shape[1]),
+            nn.BatchNorm1d(shape[1]),
+            nn.ReLU(),
+            nn.Linear(shape[1], shape[2]),
+            nn.BatchNorm1d(shape[2])
+        )
+
+    def forward(self, x):
+        return self.main(x)

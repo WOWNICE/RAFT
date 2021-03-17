@@ -28,6 +28,7 @@ from models import * #import all the registries
 total_samples_dict = {
     'imagenet':     1281167,
     'cifar10':      50000,
+    'cifar100':     50000,
     'subimagenet':  126689
 }
 
@@ -74,7 +75,7 @@ def train(gpu, args):
     train_loader = torch.utils.data.DataLoader(
         trainset,
         batch_size=args.batch_size,
-        shuffle=True,
+        shuffle=False,
         num_workers=args.num_workers,
         pin_memory=True,
         sampler=train_sampler,
@@ -109,7 +110,10 @@ def train(gpu, args):
 
         # bgm arguments
         prior=args.prior,
-        solver=args.solver
+        solver=args.solver,
+
+        # barlow arguments
+        lmbda=args.lmbda
     )
 
     # reload the checkpoint
@@ -163,7 +167,7 @@ def train(gpu, args):
 
     # solver
     global_step = 0
-    for epoch in range(args.reload_epoch, args.epochs+args.reload_epoch):
+    for epoch in range(args.reload_epoch, args.epochs):
         current_time = time.time()
         model.module.clear()    # clear the metrics dic
         for step, ((x1, x2), labels) in enumerate(train_loader):
@@ -341,6 +345,10 @@ if __name__ == '__main__':
                         help='the prior distribution to match for collapse prevention.')
     parser.add_argument('--solver', default='dense', type=str, metavar='N',
                         help='the assignment problem solver.')
+
+    # setting for the barlow model
+    parser.add_argument('--lmbda', default=5e-3, type=float, metavar='N',
+                        help='the off-diag weight of barlow model')
 
     args = parser.parse_args()
     # print(args)

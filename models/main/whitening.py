@@ -64,11 +64,6 @@ class Model(nn.Module):
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
 
     def forward(self, x1, x2):
-        """
-        loss = loss_consistency + loss_cross_model + loss_cross_term
-        :param x:
-        :return: three loss
-        """
         # generate two randomly-permutated views
         # combine kornia and torchvision.transforms together to boost the performance
         reps1 = self.gen_rep(x1)
@@ -103,26 +98,38 @@ class Model(nn.Module):
         y_online2, z2 = reps2
 
         # enqueue the new representation.
-        self._dequeue_and_enqueue(torch.cat([z1,z2], dim=0))
+        # self._dequeue_and_enqueue(torch.cat([z1,z2], dim=0))
+        self._dequeue_and_enqueue(z2)
 
         if not self.queue_full:
             print(f"filling up the queue.")
             return 0*torch.norm(z1) # not generating any loss.
 
         # if singular then cut the dimension by the half of the rank.
-        q_rank = torch.matrix_rank(torch.mm(self.queue.T, self.queue))
-        if q_rank == self.queue.shape[1]:
-            w = _whiten(self.queue, eps=self.eps, whiten_method=self.whiten) # symmetric whitening matrix
-            w_z1, w_z2 = torch.mm(z1, w), torch.mm(z2, w)
+        avg_q  = self.queue - self.queue.mean(dim=0, keepdims=True)
+        q_rank = torch.matrix_rank(torch.mm(avg_q.T, avg_q))
+        loss = 0
+
+        # if q_rank == self.queue.shape[1]:
+        if True:
+            with torch.no_grad():
+                w = _whiten(self.queue, eps=self.eps, whiten_method=self.whiten) # symmetric whitening matrix
+                # w_z1, w_z2 = torch.mm(z1, w), torch.mm(z2, w)
+                w_z2 = z2.mm(w)
+            # loss += 2 - (self.normalize(z1) * self.normalize(w_z2) + self.normalize(z2) * self.normalize(w_z1)).sum() / z1.shape[0]
+            # loss += 2 - (self.normalize(z1) * self.normalize(w_z1) + self.normalize(z2) * self.normalize(w_z2)).sum() / z1.shape[0]
+            # loss += 0.5 * ((z1 - self.normalize(w_z2)).square().sum() + (z2 - self.normalize(w_z1)).square().sum()) / z1.shape[0]
+            loss += (z1 - self.normalize(w_z2)).square().sum() / z1.shape[0]
         else:
-            w_fs = int(q_rank // 2)
-            perm = torch.randperm(z1.shape[1])
-            z1, z2, q = z1[:, perm][:, :w_fs], z2[:, perm][:,:w_fs], self.queue[:,perm][:,:w_fs]
+            for _ in range(self.w_iter):
+                w_fs = int(q_rank // 2)
+                perm = torch.randperm(z1.shape[1])
+                z1, z2, q = z1[:, perm][:, :w_fs], z2[:, perm][:,:w_fs], self.queue[:,perm][:,:w_fs]
 
-            w = _whiten(q, eps=self.eps, whiten_method=self.whiten)
-            w_z1, w_z2 = torch.mm(z1, w), torch.mm(z2, w)
+                w = _whiten(q, eps=self.eps, whiten_method=self.whiten)
+                w_z1, w_z2 = torch.mm(z1, w), torch.mm(z2, w)
 
-        loss = 2 - (self.normalize(z1) * self.normalize(w_z2) + self.normalize(z2) * self.normalize(w_z1)).sum() / z1.shape[0]
+                loss += 2 - (self.normalize(z1) * self.normalize(w_z2) + self.normalize(z2) * self.normalize(w_z1)).sum() / z1.shape[0]
 
         return loss
 
@@ -176,10 +183,10 @@ def _whiten(x, eps, whiten_method='cholesky'):
         whiten_method=bn:       eps=[sqrt(var + eps)]
         whiten_method=others:   eps=[(1-eps)*cov + eps*eye]
     :param whiten_method:
-        whitening methodm, default=cholesky
+        whitening method, default='cholesky'
     :return:
     """
-    assert (whiten_method in ['cholesky', 'bn', 'zca'])
+    # assert (whiten_method in ['cholesky', 'zca', 'zca-cor'])
     x = x - x.mean(dim=0, keepdims=True)
     x_cov = torch.mm(x.T, x) / (x.shape[0] - 1)
 
@@ -190,8 +197,28 @@ def _whiten(x, eps, whiten_method='cholesky'):
         # cholesky is default
         L = torch.cholesky(x_cov)
         return torch.inverse(L).T
+
+    elif whiten_method == 'zca':
+        U, A, _ = torch.svd(x_cov)
+        A_minus_half = (1./A.sqrt()).diag()
+
+        return U.mm(A_minus_half).mm(U).T
+
+    elif whiten_method == 'zca-cor':
+        # decompose x_cov into V^0.5 P V^0.5
+        V = x_cov.diag()
+        V_minus_half = (1./V.sqrt()).diag()
+        P = V_minus_half.mm(x_cov).mm(V_minus_half)
+
+        # P = G O G^T
+        G, O, _ = torch.svd(P)
+        O_minus_half = (1./O.sqrt()).diag()
+        P_minus_half = G.mm(O_minus_half).mm(G)
+
+        return P_minus_half.mm(V_minus_half).T
+
     else:
-        raise NotImplementedError(f"{whiten_method} is not implemented yet.")
+        raise NotImplementedError(f"Whitening method '{whiten_method}' is not implemented yet.")
 
 
 @torch.no_grad()

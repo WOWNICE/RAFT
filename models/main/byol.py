@@ -98,7 +98,8 @@ class Model(nn.Module):
 
         # compute the loss
         # loss = ((z_online_pred1 - z_target2).square().sum(dim=1).mean() + (z_online_pred2 - z_target1).square().sum(dim=1).mean()) / 2
-        loss = 2 - (z_online_pred1 * z_target2 + z_online_pred2 * z_target1).sum() / z_online_pred1.shape[0]
+        loss = ((z_online_pred1 - z_target2).square().mean() + (z_online_pred2 - z_target1).square().mean()) / 2
+        # loss = 2 - (z_online_pred1 * z_target2 + z_online_pred2 * z_target1).sum() / z_online_pred1.shape[0]
 
         return loss
 
@@ -117,9 +118,9 @@ class Model(nn.Module):
 
         batch_size = min(y_online.shape[0], 64)
 
-        self.reps[f'online.{num}'] = self.normalize(z_online)[:batch_size,:]
-        self.reps[f'online.pred.{num}'] = self.normalize(z_online_pred)[:batch_size,:]
-        self.reps[f'target.{num}'] = self.normalize(z_target)[:batch_size,:]
+        self.reps[f'online.{num}'] = self.normalize(z_online)[:batch_size,:].detach()
+        self.reps[f'online.pred.{num}'] = self.normalize(z_online_pred)[:batch_size,:].detach()
+        self.reps[f'target.{num}'] = self.normalize(z_target)[:batch_size,:].detach()
 
     def forward(self, x1, x2):
         """
