@@ -84,8 +84,8 @@ class Model(nn.Module):
         y_online1, z1 = reps1
         y_online2, z2 = reps2
 
-        z1 = self.normalize(z1 - z1.mean(0))
-        z2 = self.normalize(z2 - z2.mean(0))
+        z1 = (z1 - z1.mean(0)) / z1.std(0)
+        z2 = (z2 - z2.mean(0)) / z2.std(0)
 
         c = z1.T.mm(z2) / z1.shape[0]
 
