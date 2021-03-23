@@ -56,7 +56,7 @@ class BaseWarmupAnnealing(BaseLRWrapper):
 
         self.c_step = c_step if c_step else 0
         self.max_lr = self.baselr
-        self.min_lr = self.baselr * 1e-3
+        self.min_lr = self.baselr * 1e-2
 
         self.warmup, self.anneal = warm_anneal
 

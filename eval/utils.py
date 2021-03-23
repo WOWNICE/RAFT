@@ -11,6 +11,13 @@ dataset_classes = {
     'imagenet': 1000,
 }
 
+total_samples_dict = {
+    'imagenet':     1281167,
+    'cifar10':      50000,
+    'cifar100':     50000,
+    'subimagenet':  126689
+}
+
 def correct_k(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
     with torch.no_grad():

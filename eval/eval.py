@@ -49,7 +49,20 @@ def eval(gpu, online, args):
 
     # criterion and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
-    optimizer = torch.optim.Adam(lr_model.parameters(), lr=args.lr)
+
+    if args.optimizer == 'adam':
+        optimizer = torch.optim.Adam(lr_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    elif args.optimizer == 'sgd':
+        optimizer = torch.optim.SGD(lr_model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=args.momentum)
+
+    # lr scheduling
+    # compute batch size / global batch size and other helpful information
+    global_bs = args.batch_size * args.gpus
+
+    total_steps = args.epochs * total_samples_dict[args.dataset] // global_bs
+    warmup_steps = args.warmup_epochs * total_samples_dict[args.dataset] // global_bs
+
+    optimizer = WRAPPERS[args.lr_wrapper](optimizer, total_steps=total_steps, warmup_steps=warmup_steps, c_step=0)
 
     #############################
     # TRAINING
@@ -163,13 +176,15 @@ if __name__ == '__main__':
     # training details
     parser.add_argument('--epochs', default=100, type=int, metavar='N',
                         help='number of total epochs to train the linear model')
+    parser.add_argument('--warmup-epochs', default=0, type=int, metavar='N',
+                        help='number of total epochs to train the linear model')
     parser.add_argument('--batch-size', default=512, type=int, metavar='N',
                         help='batch size per node')
     parser.add_argument('--rand-seed', default=2333, type=int, metavar='N',
                         help='default random seed to initialize the model')
     parser.add_argument('--resize-dim', default=32, type=int, metavar='N',
                         help='resize the image dimension')
-    parser.add_argument('--lr', default=3e-4, type=float, metavar='N',
+    parser.add_argument('--lr', default=3e-3, type=float, metavar='N',
                         help='learning rate')
     parser.add_argument('--checkpoint', default='', type=str, metavar='N',
                         help='checkpoint file path')
@@ -177,6 +192,14 @@ if __name__ == '__main__':
                         help='how many sub-processes when loading data')
     parser.add_argument('--eval-mode', default='online', type=str, metavar='N',
                         help='which model to be evaluated.')
+    parser.add_argument('--optimizer', default='sgd', type=str, metavar='N',
+                        help='optimizer')
+    parser.add_argument('--weight-decay', default=0., type=float, metavar='N',
+                        help='weight decay for the network learning')
+    parser.add_argument('--momentum', default=0.9, type=float, metavar='N',
+                        help='momentum for the sgd optimizer.')
+    parser.add_argument('--lr-wrapper', default='empty', type=str, metavar='N',
+                        help='momentum for the sgd optimizer.')
 
     # sub-process info
     parser.add_argument('-n', '--nodes', default=1, type=int, metavar='N',

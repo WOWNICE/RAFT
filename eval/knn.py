@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 from torchvision import transforms
 import argparse
 from torch.multiprocessing import Process, Queue
@@ -24,7 +24,7 @@ def eval_knn(model, args):
     train_loaders = [torch.utils.data.DataLoader(
         torch.utils.data.Subset(trainset, ind),
         batch_size=args.batch_size,
-        shuffle=False,
+        shuffle=True,
         num_workers=args.num_workers,
         pin_memory=False,
     ) for ind in inds]
@@ -34,7 +34,7 @@ def eval_knn(model, args):
     test_loader = torch.utils.data.DataLoader(
         testset,
         batch_size=args.batch_size,
-        shuffle=False,
+        shuffle=True,
         num_workers=args.num_workers,
         pin_memory=True,
     )
@@ -43,7 +43,7 @@ def eval_knn(model, args):
     queue, exit_queue = Queue(), Queue()
     processes = [
         Process(target=load_tensor_single,
-                args=(gpu, model, train_loader, test_loader, args.k, queue, exit_queue))
+                args=(gpu, model, train_loader, test_loader, args.k, queue, exit_queue, args.rep_space))
         for (gpu, train_loader) in enumerate(train_loaders)
     ]
 
@@ -80,16 +80,23 @@ def eval_knn(model, args):
     print(f"[TIME]\t[KNN-EVAL-TIME={time.time()-start_time:.2f}]s")
 
 @torch.no_grad()
-def load_tensor_single(gpu, model, train_loader, test_loader, k, queue, exit_queue):
+def load_tensor_single(gpu, model, train_loader, test_loader, k, queue, exit_queue, rep_space):
     torch.cuda.set_device(gpu) # deals with imbalanced gpu usage.
     model = model.cuda()
+
+    if rep_space == 'norm':
+        f = F.normalize
+    elif rep_space == 'shift-norm':
+        f = lambda x: F.normalize(x - x.mean(0))
+    else:
+        f = lambda x: x
 
     # test features
     xs, ys = [], []
     for step, (images, labels) in enumerate(test_loader):
         images, labels = images.cuda(non_blocking=True), labels.cuda(non_blocking=True)
 
-        reps = model(images)
+        reps = f(model(images))
 
         xs.append(reps)
         ys.append(labels)
@@ -103,7 +110,7 @@ def load_tensor_single(gpu, model, train_loader, test_loader, k, queue, exit_que
     for step, (images, labels) in enumerate(train_loader):
         images, labels = images.cuda(non_blocking=True), labels.cuda(non_blocking=True)
 
-        reps = model(images)
+        reps = f(model(images))
 
         # concat and order
         ds = torch.cdist(test_x, reps) if ds is None else torch.cat([ds, torch.cdist(test_x, reps)], dim=1)
@@ -167,6 +174,8 @@ if __name__ == '__main__':
                         help='split the training features into {gpus} parts.')
     parser.add_argument('--k', default=5, type=int,
                         help='k neighbors.')
+    parser.add_argument('--rep-space', default='original', type=str,
+                        help='whether do transformation to the representation space.')
 
     args = parser.parse_args()
 

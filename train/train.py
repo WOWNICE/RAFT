@@ -107,6 +107,7 @@ def train(gpu, args):
         w_iter=args.w_iter,
         w_fs=args.w_fs,
         queue_size=args.q_size,
+        cov_ema=args.cov_ema,
 
         # bgm arguments
         prior=args.prior,
@@ -339,6 +340,8 @@ if __name__ == '__main__':
                         help='sliced feature size of the representations')
     parser.add_argument('--q-size', default=2048, type=int, metavar='N',
                         help='sliced feature size of the representations')
+    parser.add_argument('--cov-ema', default=0., type=float, metavar='N',
+                        help='moving average of the covariance matrix.')
 
     # setting for the bgm model
     parser.add_argument('--prior', default='gaussian', type=str, metavar='N',

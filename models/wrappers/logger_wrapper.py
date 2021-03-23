@@ -69,8 +69,9 @@ class AlignLogger(EmptyLogger):
             # only estimate the first two views
             v1, v2 = lst[0], lst[1]
             normed_v1, normed_v2 = F.normalize(v1 - v1.mean(0)), F.normalize(v2 - v2.mean(0))
-            self.metrics[f'align.{key}'].append(_lalign(v1, v2))
-            self.metrics[f'align_normed.{key}'].append(_lalign(normed_v1, normed_v2))
+            self.metrics[f'align.direct.{key}'].append(_lalign(v1, v2))
+            self.metrics[f'align.direct_normed.{key}'].append(_lalign(F.normalize(v1), F.normalize(v2)))
+            self.metrics[f'align.shifted_normed.{key}'].append(_lalign(normed_v1, normed_v2))
 
         # try:
         #     for key, lst in views.items():
@@ -98,18 +99,21 @@ class UniformLogger(EmptyLogger):
         views = collections.defaultdict(list)
         for key in reps:
             name, _ = _parse_name(key)
-            if 'online' in name:
-                views[name].append(reps[key])
+            views[name].append(reps[key])
 
         for key, lst in views.items():
             # only estimate the first views
-            vec = lst[0]
-            vec = F.normalize(vec - vec.mean(0))
+            vec = F.normalize(lst[0])
+            shift_vec = F.normalize(lst[0] - lst[0].mean(0))
             try:
                 uniform = _lunif_gpu(vec)  # torch.pdist is not supported by apex.amp
+                shift_uniform = _lunif_gpu(shift_vec)
             except:
                 uniform = _lunif_cpu(vec)
-            self.metrics[f'uniform.{key}'].append(uniform)
+                shift_uniform = _lunif_cpu(shift_vec)
+            self.metrics[f'uniform.direct.{key}'].append(uniform)
+            self.metrics[f'uniform.shifted.{key}'].append(shift_uniform)
+
 
         # try:
         #     for key, lst in views.items():
@@ -155,7 +159,23 @@ class RepNormLogger(EmptyLogger):
         for key, val in reps.items():
             # only estimate the first views
             norm = torch.norm(val) / val.shape[0]
-            self.metrics[f'rep_norm.{key}'].append(norm.detach().item())
+            self.metrics[f'rep.norm.{key}'].append(norm.detach().item())
+
+@WRAPPERS.register_module('repmeannormlogger')
+class RepMeanLogger(EmptyLogger):
+    def __init__(self, model, **kwargs):
+        super(RepMeanLogger, self).__init__(model=model)
+
+    @torch.no_grad()
+    def estimate(self):
+        super(RepMeanLogger, self).estimate()
+
+        reps = self.module.reps
+
+        for key, val in reps.items():
+            # only estimate the first views
+            norm = torch.norm(val - val.mean(0)) / val.shape[0]
+            self.metrics[f'rep.meannorm.{key}'].append(norm.detach().item())
 
 
 # utils
