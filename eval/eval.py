@@ -27,8 +27,9 @@ def cleanup():
 
 def eval(gpu, online, args):
     # dist stuff
-    rank = args.nr * args.gpus + gpu
-    dist.init_process_group(backend='nccl', init_method='env://', world_size=args.world_size, rank=rank)
+    if args.distributed:
+        rank = args.nr * args.gpus + gpu
+        dist.init_process_group(backend='nccl', init_method='env://', world_size=args.world_size, rank=rank)
     torch.manual_seed(args.rand_seed)
 
     torch.cuda.set_device(gpu)
@@ -45,7 +46,8 @@ def eval(gpu, online, args):
 
     # DDP wrapper for the model
     # online = nn.parallel.DistributedDataParallel(online, device_ids=[gpu])
-    lr_model = nn.parallel.DistributedDataParallel(lr_model, device_ids=[gpu])
+    if args.distributed:
+        lr_model = nn.parallel.DistributedDataParallel(lr_model, device_ids=[gpu])
 
     # criterion and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
@@ -69,13 +71,13 @@ def eval(gpu, online, args):
     # set up the dataset
     load_trainset = getattr(importlib.import_module(f'dataset_apis.{args.dataset}'), 'load_eval_trainset')
     trainset = load_trainset()
-
+    
     train_sampler = torch.utils.data.distributed.DistributedSampler(
         trainset,
         num_replicas=args.world_size,
         rank=rank,
         shuffle=True,
-    )
+    ) if args.distributed else None
 
     train_loader = torch.utils.data.DataLoader(
         trainset,
@@ -155,7 +157,7 @@ def eval(gpu, online, args):
     if gpu == 0:
         print(f"[TEST]\t[TOP1={top1_acc*100.:3.2f}%]\t[TOP5={top5_acc*100.:3.2f}%]")
 
-    cleanup()
+    if args.distributed: cleanup()
 
 
 
@@ -210,12 +212,10 @@ if __name__ == '__main__':
                         help='ranking within the nodes')
     parser.add_argument('--port', default='8010', type=str, metavar='N',
                         help='port number')
+    parser.add_argument('--distributed', action='store_true',
+                        help='whether use distributed mode')
 
     args = parser.parse_args()
-
-    args.world_size = args.gpus * args.nodes
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = args.port
 
     # used for estimating the random baseline.
     if args.eval_mode == 'rand':
@@ -231,10 +231,18 @@ if __name__ == '__main__':
             predictor=args.predictor
         )
 
-    # eval args
-    # eval(model, args)
+    if args.distributed:
+        args.world_size = args.gpus * args.nodes
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = args.port
 
-    print(f'[SPAWN]\t[PORT={args.port}]')
-    mp.spawn(eval, nprocs=args.gpus, args=(model, args,), join=True)
+        print(f'[SPAWN]\t[PORT={args.port}]')
+        mp.spawn(eval, nprocs=args.gpus, args=(model, args,), join=True)
+
+    else:
+        # eval args
+        # eval(model, args)
+        eval(gpu=0, online=model, args=args)
+
 
 

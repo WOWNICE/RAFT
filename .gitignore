@@ -5,6 +5,7 @@ nohup.out
 playground.py
 data/*
 tools/_*
+.DS_Store
 
 # expect this one
 !.gitignore
